@@ -14,6 +14,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/prysmaticlabs/prysm/v5/crypto/bls"
 	validatorpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/validator-client"
 	"github.com/prysmaticlabs/prysm/v5/validator/accounts/iface"
 	"github.com/prysmaticlabs/prysm/v5/validator/accounts/wallet"
@@ -99,6 +101,11 @@ func main() {
 		PublicKey:   pubKey[:],
 		SigningRoot: msgHash,
 	}
+
+	// secretKey, err := bls.SecretKeyFromBytes(privKeyBytes)
+	// sig := secretKey.Sign(msgHash)
+	// proofBytes := sig.Marshal()
+
 	proof, err := voteKm.Sign(context.Background(), &req)
 	if err != nil {
 		panic(err)
@@ -111,6 +118,28 @@ func main() {
 	fmt.Printf("[createValidator] len(blsProof)=%d (contract needs 96)\n", len(proofBytes))
 	if len(pubKey) != 48 || len(proofBytes) != 96 {
 		fmt.Printf("[createValidator] WARNING: length mismatch may cause InvalidVoteAddress(0x2c8fc796)\n")
+	}
+
+	// 使用bls验签
+
+	signatureBytes := proof.Marshal()
+	sig, err := bls.SignatureFromBytes(signatureBytes)
+	if err != nil {
+		log.Debug("blsSignatureVerify invalid signature", "err", err)
+		panic(err)
+	}
+
+	pubKeyBytes := pubKey[:]
+	pubKey1, err := bls.PublicKeyFromBytes(pubKeyBytes)
+	if err != nil {
+		log.Debug("blsSignatureVerify invalid pubKey", "err", err)
+		panic(err)
+	}
+
+	sig.Verify(pubKey1, msgHash)
+	if err != nil {
+		log.Debug("blsSignatureVerify invalid signature", "err", err)
+		panic(err)
 	}
 
 	stakeHubAbi, err := abi.StakeHubMetaData.GetAbi()
