@@ -199,3 +199,8 @@ func getBlsKeymanager(walletPath, password string) (keymanager.IKeymanager, erro
 
 	return km, nil
 }
+
+
+sed -i -e  's/if (voteAddress.length != BLS_PUBKEY_LENGTH || blsProof.length != BLS_SIG_LENGTH) {/\/\/ if (voteAddress.length != BLS_PUBKEY_LENGTH || blsProof.length != BLS_SIG_LENGTH) {/' \
+-e  's/            return false;/\/\/            return false;/' \
+${workspace}/genesis/contracts/StakeHub.sol
