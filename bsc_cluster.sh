@@ -14,13 +14,13 @@ extra_size=$((EXTRA_VALIDATOR_SIZE))
 stateScheme="hash"
 dbEngine="leveldb"
 gcmode="full"
-sleepBeforeStart=15
+sleepBeforeStart=5
 sleepAfterStart=10
 
 # stop geth client
 function exit_previous() {
     ValIdx=$1
-    ps -ef  | grep geth$ValIdx | grep config |awk '{print $2}' | xargs kill
+    ps -ef  | grep geth$ValIdx | grep config |awk '{print $2}' | xargs kill -9
     sleep ${sleepBeforeStart}
 }
 
@@ -366,7 +366,7 @@ CMD=$1
 ValidatorIdx=$2
 case ${CMD} in
 reset)
-    exit_previous
+    #exit_previous
     create_validator
     prepare_bsc_client
     reset_genesis
