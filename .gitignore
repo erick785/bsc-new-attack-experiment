@@ -1,7 +1,13 @@
-node-deploy
+/node-deploy
 
 .foundry
 
 *.txt
 
 1.go
+
+/testdata/.local
+/path
+
+/code/attack-1-code
+/code/attack-2-code
