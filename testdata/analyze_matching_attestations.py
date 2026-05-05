@@ -182,46 +182,48 @@ def build_rows(
     start: int,
     end: int,
     split_height: int,
-    threshold: int,
     count_field: str,
     fill: str,
 ) -> list[dict[str, int | str]]:
     branch_a_by_slot = series_by_slot(parsed.attestations, side="A", count_field=count_field)
     branch_b_by_slot = series_by_slot(parsed.attestations, side="B", count_field=count_field)
     total_by_slot = total_series_by_slot(parsed.attestations)
+    pre_split_totals = [value for slot, value in total_by_slot.items() if start <= slot <= split_height]
+    benchmark_attestations = max(pre_split_totals) if pre_split_totals else max(total_by_slot.values(), default="")
 
     rows: list[dict[str, int | str]] = []
-    last_a: int | str = ""
-    last_b: int | str = ""
+    last_a: int | str = 0
+    last_b: int | str = 0
     if fill == "forward-backfill":
         first_a = next(
             (
-                total_by_slot[slot] if slot < split_height else branch_a_by_slot[slot]
+                branch_a_by_slot[slot]
                 for slot in range(start, end + 1)
-                if (slot < split_height and slot in total_by_slot)
-                or (slot >= split_height and slot in branch_a_by_slot)
+                if slot > split_height and slot in branch_a_by_slot
             ),
-            "",
+            0,
         )
         first_b = next(
             (
-                total_by_slot[slot] if slot < split_height else branch_b_by_slot[slot]
+                branch_b_by_slot[slot]
                 for slot in range(start, end + 1)
-                if (slot < split_height and slot in total_by_slot)
-                or (slot >= split_height and slot in branch_b_by_slot)
+                if slot > split_height and slot in branch_b_by_slot
             ),
-            "",
+            0,
         )
-        last_a = first_a
-        last_b = first_b
 
     for slot in range(start, end + 1):
-        if slot < split_height:
-            current_a = total_by_slot.get(slot, "")
-            current_b = current_a
+        if slot <= split_height:
+            current_a: int | str = 0
+            current_b: int | str = 0
         else:
             current_a = branch_a_by_slot.get(slot, "")
             current_b = branch_b_by_slot.get(slot, "")
+            if fill == "forward-backfill" and slot == split_height + 1:
+                if current_a == "":
+                    current_a = first_a
+                if current_b == "":
+                    current_b = first_b
         if fill in {"forward", "forward-backfill"}:
             if current_a != "":
                 last_a = current_a
@@ -232,9 +234,9 @@ def build_rows(
         rows.append(
             {
                 "slot": slot,
+                "benchmark_attestations": benchmark_attestations,
                 "g1_matching_attestations_on_CA": current_a,
                 "g2_matching_attestations_on_CB": current_b,
-                "threshold": threshold,
             }
         )
     return rows
@@ -247,9 +249,9 @@ def write_csv(rows: list[dict[str, int | str]], output: Path) -> None:
             handle,
             fieldnames=[
                 "slot",
+                "benchmark_attestations",
                 "g1_matching_attestations_on_CA",
                 "g2_matching_attestations_on_CB",
-                "threshold",
             ],
         )
         writer.writeheader()
@@ -269,13 +271,7 @@ def parse_args() -> argparse.Namespace:
         "--split-height",
         type=int,
         default=398,
-        help="height where C_A/C_B start to diverge; earlier slots use votedCount for both branches",
-    )
-    parser.add_argument("--threshold", type=int, default=14, help="N-f threshold to write")
-    parser.add_argument(
-        "--infer-threshold",
-        action="store_true",
-        help="use the implementation quorum (`need`) from logs instead of --threshold",
+        help="last common height before C_A/C_B attestation series starts",
     )
     parser.add_argument(
         "--count-field",
@@ -332,19 +328,11 @@ def main() -> None:
     if end < args.start:
         raise ValueError(f"end ({end}) must be >= start ({args.start})")
 
-    threshold = args.threshold
-    if args.infer_threshold:
-        inferred = infer_threshold(parsed.attestations)
-        if inferred is None:
-            raise ValueError("cannot infer threshold: no attestation events found")
-        threshold = inferred
-
     rows = build_rows(
         parsed=parsed,
         start=args.start,
         end=end,
         split_height=args.split_height,
-        threshold=threshold,
         count_field=args.count_field,
         fill=args.fill,
     )
@@ -354,7 +342,7 @@ def main() -> None:
     b_events = sum(1 for event in parsed.attestations if event.side == "B")
     print(f"wrote {len(rows)} rows to {output_path}")
     print(
-        f"logs={parsed.log_count} threshold={threshold} count_field={args.count_field} "
+        f"logs={parsed.log_count} count_field={args.count_field} "
         f"a_events={a_events} b_events={b_events}"
     )
 
