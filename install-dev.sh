@@ -16,9 +16,10 @@ wget https://go.dev/dl/go1.21.10.linux-amd64.tar.gz && \
     rm go1.21.10.linux-amd64.tar.gz
 export PATH="/usr/local/go/bin:${PATH}"
 
-# Install Foundry 
+# Install Foundry (pin to v1.2.1 to match CI in node-deploy/genesis/.github/workflows/unit-test.yml;
+# newer versions break `forge install --no-git foundry-rs/forge-std@v1.7.3` due to ds-test submodule handling)
 curl -L https://foundry.paradigm.xyz | bash && \
-    /root/.foundry/bin/foundryup
+    /root/.foundry/bin/foundryup -i v1.2.1
 export PATH="/root/.foundry/bin:${PATH}"
 
 # Install Poetry (Ubuntu 24.04+ needs --break-system-packages)
