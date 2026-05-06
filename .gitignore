@@ -8,7 +8,9 @@
 
 /testdata/.local
 /testdata/.local.b
+/testdata/.local.bb/
 /path
 
 /code/attack-1-code
 /code/attack-2-code
+/code/repair-code
