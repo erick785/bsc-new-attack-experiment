@@ -41,39 +41,57 @@ Simple sketch:
 
 Attack 2 Experiment layout:
 
-At block height 399, a block is produced by address 0x3ad... (this follows Parlia's natural in-turn schedule).
-Starting from height 400, we enter the experiment window.
-During the experiment, nodes no longer broadcast blocks freely; instead, they only send blocks via directed delivery
-according to the routing table below: (height, miner) → target validator.
+Attack 2 starts from the same 21-validator local BSC cluster, then creates two directed-propagation branches starting
+at height `398`. During the manual schedule window, nodes do not broadcast blocks freely. Each scheduled block is sent
+only to the next validator on that branch.
+
+Before the split, the script starts the extra validators but keeps their registration transactions out of blocks. At
+height `399`, each branch packs a different validator-add transaction set:
+
+- A chain: `399(6c)` packs the transactions that add validators `21..31`.
+- B chain: `399'(20)` packs the transactions that add validators `32..41`.
+
+The manual routing schedule runs through `410/410'`. After that, the branch-specific validator sets continue sealing
+naturally, while block propagation remains partitioned: A-side validators and A-side added validators only receive A
+branch blocks, and B-side validators and B-side added validators only receive B branch blocks.
 
 Two parallel chains:
 
 ```text
-  difficulty :            2    →    1    →    2    →    2    →     1   →    1
-  Chain A (no prime):  400(5e) → 401(f7) → 402(bb) → 403(bc) → 404(fe) → 405(5f)
+  difficulty :            2    →    1    →    2    →    1    →    2    →    1    →    2    →    1    →    2    →    1    →    1    →    2    →    1
+  Chain A (no prime):  398(fe) → 399(6c) → 400(29) → 401(a8) → 402(50) → 403(bb) → 404(51) → 405(c1) → 406(5e) → 407(d3) → 408(f7) → 409(9b) → 410(3a)
 ```
 
 ```text
-  difficulty :            1     →   2      →    1     →     1    →    1     →    1
-  Chain B (prime):     400'(bc) → 401'(5f) → 402'(fe) → 403'(5e) → 404'(3a) → 405'(f7)
+  difficulty :            1     →    2     →    1     →    2     →    1     →     2    →    1     →    2     →    1     →    1     →    2     →    1     →    2
+  Chain B (prime):     398'(5f) → 399'(20) → 400'(9b) → 401'(3a) → 402'(ab) → 403'(511) → 404'(bc) → 405'(5a) → 406'(d2) → 407'(e9) → 408'(6c) → 409'(29) → 410'(a8)
 ```
 
 Broadcast routing:
 
 ```text
-  400  5e → f7                                                          |  400' bc → 5f
-  401  f7 → bb                                                          |  401' 5f → fe
-  402  bb → bc (bc switches back from 400' to Chain A and produces 403) |  402' fe → 5e (5e switches back from 400 to Chain B and produces 403')
-  403  bc → fe (fe switches back from 402' to Chain A and produces 404) |  403' 5e → 3a
-  404  fe → 5f (5f switches back from 401' to Chain A and produces 405) |  404' 3a → f7
-  405  5f → ∅ (do not broadcast)                                        |  405' f7 → ∅ (do not broadcast)
+  398  fe → 6c   |  398' 5f → 20
+  399  6c → 29   |  399' 20 → 9b
+  400  29 → a8   |  400' 9b → 3a
+  401  a8 → 50   |  401' 3a → ab
+  402  50 → bb   |  402' ab → 511
+  403  bb → 51   |  403' 511 → bc
+  404  51 → c1   |  404' bc → 5a
+  405  c1 → 5e   |  405' 5a → d2
+  406  5e → d3   |  406' d2 → e9
+  407  d3 → f7   |  407' e9 → 6c
+  408  f7 → 9b   |  408' 6c → 29
+  409  9b → 3a   |  409' 29 → a8
+  410  3a → ab   |  410' a8 → 50
+  after 410, both branches continue sealing naturally with branch-local propagation.
 ```
 
 Design notes:
-For every reorg recipient, the TD of the recipient's current chain is strictly smaller than the broadcast block's trueTD
-(= block.TD - block.Diff). Only under this condition will chainSync.nextSyncOp trigger the downloader to fetch missing
-ancestors. After the recipient finishes the reorg, it produces the next block according to the schedule.
-After finishing 405/405', all nodes stop producing and broadcasting blocks; the experiment ends.
+For every scheduled reorg recipient, the TD of the recipient's current chain is strictly smaller than the broadcast
+block's trueTD (= block.TD - block.Diff). Only under this condition will `chainSync.nextSyncOp` trigger the downloader
+to fetch missing ancestors. After the recipient finishes the reorg, it produces the next scheduled block. From `411`
+onward, the explicit sealing gate is lifted and each branch seals naturally, but block propagation remains isolated by
+branch.
 
 ## 🚀 Quick Access
 
@@ -105,6 +123,15 @@ t=05-04|17:52:43.035 lvl=info msg="Parlia finalized block number changed" header
 ```
 
 ### For attack 2
+
+The attack is considered successful when both branches finalize independently after the manual split window. The
+automation watches multiple branch-local candidate logs:
+
+- A chain: nodes for `412(511)`, `413(bc)`, `414(5a)`, and `415(d2)`.
+- B chain: nodes for `411'(50)`, `412'(bb)`, `413'(51)`, `414'(c1)`, and `415'(5e)`.
+
+The terminal should print one `Parlia finalized block number changed` line with `header >= 411` for each branch. The
+script then waits until both branches exceed height `450` before stopping the cluster.
 
 
 ## 💻 Source Code
@@ -203,9 +230,22 @@ Please recompile the corresponding binary before running the following attacks.
 2. Start attack 2
 
 ```bash
-# attack 2
-./test_attack_2_flow.sh # will start the attack 2 simulation
+cd node-deploy
+./test_attack_2_flow.sh
 ```
+
+The script performs the full attack-2 flow:
+
+- Build the latest `code/attack-2-code` geth binary with `make geth`.
+- Build `node-deploy/create-validator` with `go build`.
+- Install the geth binary into `node-deploy/bin/geth`.
+- Prepare the Python virtual environment and install `node-deploy/requirements.txt`.
+- Reset and start the 21-node validator cluster with `bsc_cluster_2.sh`.
+- Wait for height `201`, then start and register A-side extra validators `21..31` through the `398(fe)` node RPC
+  (`8553`).
+- Start and register B-side extra validators `32..41` through the `398'(5f)` node RPC (`8557`).
+- Wait for attack-2 branch-local finalization after height `411`.
+- Wait until both branches exceed height `450`, then stop the cluster.
 
 ## 🐳 Building Docker Images
 
