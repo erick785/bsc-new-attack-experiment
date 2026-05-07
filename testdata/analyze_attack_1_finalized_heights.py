@@ -11,8 +11,8 @@ from pathlib import Path
 from statistics import median
 
 
-DEFAULT_NODE_A_LOG = ".local/node0/bsc.log.2026-05-05_02"
-DEFAULT_NODE_B_LOG = ".local/node10/bsc.log.2026-05-05_02"
+DEFAULT_NODE_A_LOG = ".local/node1/bsc.log"
+DEFAULT_NODE_B_LOG = ".local/node10/bsc.log"
 
 FINALITY_RE = re.compile(
     r'Parlia finalized block number changed".*?\bheader=(?P<header>\d+)'
@@ -142,7 +142,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--start", type=int, default=300, help="first slot/header to output")
-    parser.add_argument("--end", type=int, default=440, help="last slot/header to output")
+    parser.add_argument("--end", type=int, default=530, help="last slot/header to output")
     parser.add_argument(
         "--split-height",
         type=int,

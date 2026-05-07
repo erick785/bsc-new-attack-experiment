@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 DEFAULT_LOG_ROOT = ".local"
-DEFAULT_LOG_NAME = "bsc.log.2026-05-05_02"
+DEFAULT_LOG_NAME = "bsc.log"
 DEFAULT_VALIDATORS_FILE = "../code/attack-1-code/params/validators.go"
 
 ATTESTATION_RE = re.compile(
@@ -266,7 +266,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--start", type=int, default=300, help="first slot to output")
-    parser.add_argument("--end", type=int, default=440, help="last slot to output")
+    parser.add_argument("--end", type=int, default=530, help="last slot to output")
     parser.add_argument(
         "--split-height",
         type=int,
