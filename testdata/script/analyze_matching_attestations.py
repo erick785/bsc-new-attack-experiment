@@ -12,7 +12,7 @@ from pathlib import Path
 
 DEFAULT_LOG_ROOT = ".local"
 DEFAULT_LOG_NAME = "bsc.log.2026-05-05_02"
-DEFAULT_VALIDATORS_FILE = "../code/attack-1-code/params/validators.go"
+DEFAULT_VALIDATORS_FILE = "../../code/attack-1-code/params/validators.go"
 
 ATTESTATION_RE = re.compile(
     r'assembleVoteAttestation .*?\bblock=(?P<block>\d+)'

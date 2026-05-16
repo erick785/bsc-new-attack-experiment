@@ -7,6 +7,9 @@
 1.go
 
 /testdata/.local
+/testdata/script/.local
+/testdata/turnlength_1/data/.local
+/testdata/turnlength_8/data/.local
 /testdata/.local.b
 /testdata/.local.bb/
 /path
