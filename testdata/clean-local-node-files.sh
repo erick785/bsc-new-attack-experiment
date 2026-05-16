@@ -10,14 +10,14 @@ usage() {
 Usage:
   ./clean-local-node-files.sh [--dry-run] [base_dir]
 
-Deletes from each node* directory under base_dir:
-  - geth.ipc
-  - bsc.log
-  - top-level geth executable files like geth0, geth1, geth2
+In each node* directory under base_dir, removes every file and directory
+except:
+  - bsc.log.* (rotated bsc logs), e.g. bsc.log.2026-05-04_17
+  - bsc-node.log and bsc-node.log.* (node log and its rotations)
 
-Keeps:
-  - bsc.log.* files, e.g. bsc.log.2026-05-04_17
-  - geth/ data directories
+Deletes:
+  - Everything else at the top level of each node* (including geth/, geth.ipc,
+    bsc.log, geth executables, etc.)
 
 Default base_dir: testdata/.local
 EOF
@@ -48,30 +48,29 @@ fi
 delete_path() {
   local path="$1"
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    printf '[dry-run] would remove %s\n' "$path"
+    if [[ -d "$path" && ! -L "$path" ]]; then
+      printf '[dry-run] would remove dir %s\n' "$path"
+    else
+      printf '[dry-run] would remove %s\n' "$path"
+    fi
   else
-    rm -f -- "$path"
+    rm -rf -- "$path"
     printf 'removed %s\n' "$path"
   fi
 }
 
 removed=0
-shopt -s nullglob
+shopt -s nullglob dotglob
 
 for node_dir in "$BASE_DIR"/node*/; do
   [[ -d "$node_dir" ]] || continue
 
-  for name in geth.ipc bsc.log; do
-    path="$node_dir$name"
-    if [[ -e "$path" || -L "$path" ]]; then
-      delete_path "$path"
-      removed=$((removed + 1))
+  for path in "$node_dir"/*; do
+    [[ -e "$path" || -L "$path" ]] || continue
+    base="$(basename "$path")"
+    if [[ "$base" == bsc.log.* || "$base" == bsc-node.log || "$base" == bsc-node.log.* ]]; then
+      continue
     fi
-  done
-
-  for path in "$node_dir"/geth*; do
-    [[ -f "$path" ]] || continue
-    [[ "$(basename "$path")" == "geth.ipc" ]] && continue
     delete_path "$path"
     removed=$((removed + 1))
   done
