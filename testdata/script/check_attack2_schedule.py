@@ -6,8 +6,8 @@ from collections import defaultdict
 from pathlib import Path
 
 
-REPO = Path(__file__).resolve().parents[1]
-DEFAULT_VALIDATORS = REPO / "code/attack-2-code/params/validators.go"
+REPO = Path(__file__).resolve().parents[2]
+DEFAULT_VALIDATORS =  REPO / "code/attack-2-code/params/validators.go"
 DEFAULT_LOG_ROOT = REPO / "node-deploy/.local"
 
 
