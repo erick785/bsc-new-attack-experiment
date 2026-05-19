@@ -188,13 +188,14 @@ sudo ./install-dev.sh
 pip3 install -r node-deploy/requirements.txt
 ```
 
-4. Compile the geth binary, and place it in the node-deploy/bin/ folder
+4. Compile the geth binary
 
 ```bash
 unzip ./code/attack-1-code.zip
-cd attack-1-code && make geth
-unzip node-deploy.zip
-mv attack-1-code/build/bin/geth node-deploy/bin/geth
+unzip ./code/attack-2-code.zip
+unzip ./code/attack-2-turnlen-8-code.zip
+unzip ./code/repair-code.zip
+unzip ./code/repair-8-code.zip
 ```
 
 ### Launching attack simulation
