@@ -207,6 +207,14 @@ cd node-deploy
 ./test_attack_1_flow.sh
 ```
 
+2. Start attack 1 with turnlength 8
+
+```bash
+cd node-deploy
+./test_attack_1_flow.sh --turnlength8
+```
+
+
 The script performs the full attack-1 flow:
 
 - Build the latest `code/attack-1-code` geth binary with `make geth`.
@@ -228,11 +236,18 @@ We recommend running each attack in a clean and isolated environment to ensure i
 
 Please recompile the corresponding binary before running the following attacks.
 
-2. Start attack 2
+3. Start attack 2
 
 ```bash
 cd node-deploy
 ./test_attack_2_flow.sh
+```
+
+4. Start attack 2 with turnlength 8
+
+```bash
+cd node-deploy
+./test_attack_2_turnlen_8_flow.sh
 ```
 
 The script performs the full attack-2 flow:
@@ -247,6 +262,20 @@ The script performs the full attack-2 flow:
 - Start and register B-side extra validators `32..41` through the `398'(5f)` node RPC (`8557`).
 - Wait for attack-2 branch-local finalization after height `411`.
 - Wait until both branches exceed height `450`, then stop the cluster.
+
+
+5. Start repair experiment
+```bash
+cd node-deploy
+./repair.sh
+```
+
+6. Start repair experiment with turnlength 8
+```bash
+cd node-deploy
+./repair_8.sh
+```
+
 
 ## 🐳 Building Docker Images
 
