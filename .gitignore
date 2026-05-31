@@ -8,8 +8,8 @@
 
 /testdata/.local
 /testdata/script/.local
-/testdata/turnlength_1/data/.local
-/testdata/turnlength_8/data/.local
+/testdata/epoch_200_interval_1000_turnlength_1/data/.local
+/testdata/epoch_200_interval_1000_turnlength_8/data/.local
 /testdata/.local.b
 /testdata/.local.bb/
 /path
