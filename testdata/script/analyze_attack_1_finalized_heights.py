@@ -11,8 +11,9 @@ from pathlib import Path
 from statistics import median
 
 
-DEFAULT_NODE_A_LOG = ".local/node0/bsc.log.2026-05-05_02"
-DEFAULT_NODE_B_LOG = ".local/node10/bsc.log.2026-05-05_02"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_NODE_A_LOG = REPO_ROOT / "node-deploy/.local/node0/bsc.log"
+DEFAULT_NODE_B_LOG = REPO_ROOT / "node-deploy/.local/node10/bsc.log"
 
 FINALITY_RE = re.compile(
     r'Parlia finalized block number changed".*?\bheader=(?P<header>\d+)'
@@ -159,13 +160,13 @@ def parse_args() -> argparse.Namespace:
         "--node-a-log",
         type=Path,
         default=Path(DEFAULT_NODE_A_LOG),
-        help="Group A log, relative to script dir unless absolute",
+        help="Group A log path (default: node-deploy/.local/node0/bsc.log)",
     )
     parser.add_argument(
         "--node-b-log",
         type=Path,
         default=Path(DEFAULT_NODE_B_LOG),
-        help="Group B log, relative to script dir unless absolute",
+        help="Group B log path (default: node-deploy/.local/node10/bsc.log)",
     )
     parser.add_argument(
         "--output",

@@ -13,7 +13,7 @@ from statistics import median
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LOG_ROOT = REPO_ROOT / "node-deploy/.local"
-DEFAULT_VALIDATORS_FILE = REPO_ROOT / "code/repair-8-code/params/validators.go"
+DEFAULT_VALIDATORS_FILE = REPO_ROOT / "code/repair-code/params/validators.go"
 DEFAULT_OUTPUT = Path(__file__).resolve().parent / "repair_finalized_heights.csv"
 
 FINALITY_RE = re.compile(
@@ -24,7 +24,7 @@ IMPORTED_RE = re.compile(r'Imported new chain segment".*?\bnumber=(?P<number>\d+
 NODE_DIR_RE = re.compile(r"node(?P<node>\d+)$")
 COMMENT_NODE_RE = re.compile(r'"(?P<addr>0x[0-9a-fA-F]+)":\s*"[^"]+",\s*//\s*(?P<node>\d+)')
 VAR_BLOCK_RE = re.compile(
-    r"var\s+(?P<name>ValidatorsAddA|ValidatorsAddB|after487LegacyTargetsA|after487LegacyTargetsB)"
+    r"var\s+(?P<name>ValidatorsAddA|ValidatorsAddB|after411LegacyTargetsA|after411LegacyTargetsB)"
     r"\s*=\s*(?:map\[string\]string|(?:\[\]string))\s*\{(?P<body>.*?)\n\}",
     re.S,
 )

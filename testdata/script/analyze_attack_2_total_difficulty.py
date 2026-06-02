@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LOG_ROOT = REPO_ROOT / "node-deploy/.local"
 DEFAULT_VALIDATORS_FILE = REPO_ROOT / "code/attack-2-code/params/validators.go"
 DEFAULT_OUTPUT = Path(__file__).resolve().parent / "attack_2_total_difficulty.csv"

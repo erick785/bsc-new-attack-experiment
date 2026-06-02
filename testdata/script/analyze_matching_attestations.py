@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-DEFAULT_LOG_ROOT = ".local"
-DEFAULT_LOG_NAME = "bsc.log.2026-05-05_02"
-DEFAULT_VALIDATORS_FILE = "../../code/attack-1-code/params/validators.go"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_LOG_ROOT = REPO_ROOT / "node-deploy/.local"
+DEFAULT_LOG_NAME = "bsc.log"
+DEFAULT_VALIDATORS_FILE = REPO_ROOT / "code/attack-1-code/params/validators.go"
 
 ATTESTATION_RE = re.compile(
     r'assembleVoteAttestation .*?\bblock=(?P<block>\d+)'
@@ -24,6 +25,14 @@ ATTESTATION_RE = re.compile(
 )
 HEIGHT_RE = re.compile(r'\b(?:number|header|block)=(?P<height>\d+)')
 VALIDATOR_ENTRY_RE = re.compile(r'"0x[0-9a-fA-F]+":\s*"[^"]+",\s*//\s*(?P<node>\d+)(?:-[A-Za-z]+)?')
+# Match full var names; startswith("var ValidatorsA") wrongly matches ValidatorsAddB.
+VALIDATOR_VAR_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("A", re.compile(r"^var\s+ValidatorsAddA\b")),
+    ("A", re.compile(r"^var\s+ValidatorsA\b")),
+    ("B", re.compile(r"^var\s+ValidatorsAddB\b")),
+    ("B", re.compile(r"^var\s+ValidatorsB\b")),
+    ("Common", re.compile(r"^var\s+ValidatorsCommon\b")),
+)
 NODE_DIR_RE = re.compile(r"node(?P<node>\d+)(?P<suffix>-[A-Za-z]+)?$")
 
 
@@ -53,14 +62,13 @@ def parse_validator_node_groups(validators_file: Path) -> tuple[set[str], set[st
 
     with validators_file.open("r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            if line.startswith("var ValidatorsA"):
-                current_group = "A"
-                continue
-            if line.startswith("var ValidatorsB"):
-                current_group = "B"
-                continue
-            if line.startswith("var ValidatorsCommon"):
-                current_group = "Common"
+            matched_var = False
+            for group_name, pattern in VALIDATOR_VAR_PATTERNS:
+                if pattern.match(line):
+                    current_group = group_name
+                    matched_var = True
+                    break
+            if matched_var:
                 continue
             if current_group and line.startswith("}"):
                 current_group = None
@@ -177,6 +185,12 @@ def max_observed_height(parsed: ParsedLogs) -> int:
     return max(candidates)
 
 
+def _csv_cell(value: int | None, fill: str) -> int | str:
+    if value is None:
+        return "" if fill == "blank" else 0
+    return value
+
+
 def build_rows(
     parsed: ParsedLogs,
     start: int,
@@ -192,51 +206,47 @@ def build_rows(
     benchmark_attestations = max(pre_split_totals) if pre_split_totals else max(total_by_slot.values(), default="")
 
     rows: list[dict[str, int | str]] = []
-    last_a: int | str = 0
-    last_b: int | str = 0
+    last_a: int | None = None
+    last_b: int | None = None
+    first_a: int | None = None
+    first_b: int | None = None
     if fill == "forward-backfill":
         first_a = next(
-            (
-                branch_a_by_slot[slot]
-                for slot in range(start, end + 1)
-                if slot > split_height and slot in branch_a_by_slot
-            ),
-            0,
+            (branch_a_by_slot[slot] for slot in range(start, end + 1) if slot > split_height and slot in branch_a_by_slot),
+            None,
         )
         first_b = next(
-            (
-                branch_b_by_slot[slot]
-                for slot in range(start, end + 1)
-                if slot > split_height and slot in branch_b_by_slot
-            ),
-            0,
+            (branch_b_by_slot[slot] for slot in range(start, end + 1) if slot > split_height and slot in branch_b_by_slot),
+            None,
         )
 
     for slot in range(start, end + 1):
         if slot <= split_height:
-            current_a: int | str = 0
-            current_b: int | str = 0
+            current_a: int | None = 0
+            current_b: int | None = 0
         else:
-            current_a = branch_a_by_slot.get(slot, "")
-            current_b = branch_b_by_slot.get(slot, "")
+            current_a = branch_a_by_slot.get(slot)
+            current_b = branch_b_by_slot.get(slot)
             if fill == "forward-backfill" and slot == split_height + 1:
-                if current_a == "":
+                if current_a is None:
                     current_a = first_a
-                if current_b == "":
+                if current_b is None:
                     current_b = first_b
-        if fill in {"forward", "forward-backfill"}:
-            if current_a != "":
-                last_a = current_a
-            if current_b != "":
-                last_b = current_b
-            current_a = last_a
-            current_b = last_b
+            if fill in {"forward", "forward-backfill"}:
+                if current_a is not None:
+                    last_a = current_a
+                elif last_a is not None:
+                    current_a = last_a
+                if current_b is not None:
+                    last_b = current_b
+                elif last_b is not None:
+                    current_b = last_b
         rows.append(
             {
                 "slot": slot,
                 "benchmark_attestations": benchmark_attestations,
-                "g1_matching_attestations_on_CA": current_a,
-                "g2_matching_attestations_on_CB": current_b,
+                "g1_matching_attestations_on_CA": _csv_cell(current_a, fill),
+                "g2_matching_attestations_on_CB": _csv_cell(current_b, fill),
             }
         )
     return rows
@@ -266,7 +276,7 @@ def parse_args() -> argparse.Namespace:
         )
     )
     parser.add_argument("--start", type=int, default=300, help="first slot to output")
-    parser.add_argument("--end", type=int, default=440, help="last slot to output")
+    parser.add_argument("--end", type=int, default=1200, help="last slot to output")
     parser.add_argument(
         "--split-height",
         type=int,
@@ -282,24 +292,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fill",
         choices=("blank", "forward", "forward-backfill"),
-        default="forward-backfill",
+        default="forward",
         help=(
-            "blank keeps only slots with attestation logs; forward carries last count forward; "
-            "forward-backfill also fills initial blanks with the first observed count"
+            "blank: empty cells when no attestation log at that slot; "
+            "forward: carry last observed count only across slots without logs; "
+            "forward-backfill: forward plus seed split+1 from first post-split observation"
         ),
     )
     parser.add_argument(
         "--log-root",
         type=Path,
         default=Path(DEFAULT_LOG_ROOT),
-        help="directory containing node*/ logs, relative to script dir unless absolute",
+        help="directory containing node*/ logs (default: node-deploy/.local)",
     )
-    parser.add_argument("--log-name", default=DEFAULT_LOG_NAME, help="log file name under each node dir")
+    parser.add_argument(
+        "--log-name",
+        default=DEFAULT_LOG_NAME,
+        help="log file name under each node dir (default: bsc.log)",
+    )
     parser.add_argument(
         "--validators-file",
         type=Path,
         default=Path(DEFAULT_VALIDATORS_FILE),
-        help="attack-1 validators.go, relative to script dir unless absolute",
+        help="attack-1 validators.go path",
     )
     parser.add_argument(
         "--output",
