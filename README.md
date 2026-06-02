@@ -290,3 +290,25 @@ cd node-deploy
 ## Contribution
 
 - For questions or bug reports, please open a GitHub issue in this repository.
+
+./test_attack_1_flow.sh
+
+./test_attack_1_flow.sh --epoch-interval epoch_200_interval_3000
+
+./test_attack_1_flow.sh --epoch-interval epoch_1000_interval_450 --turnlength8
+
+./test_attack_2_flow.sh 
+
+./test_attack_2_flow.sh --epoch-interval epoch_200_interval_3000
+
+./repair.sh
+ 
+./repair.sh --epoch-interval epoch_200_interval_3000
+
+./test_attack_2_8_flow.sh 
+
+./test_attack_2_8_flow.sh --epoch-interval epoch_1000_interval_450
+
+./repair_8.sh
+ 
+./repair_8.sh --epoch-interval epoch_1000_interval_450

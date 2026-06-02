@@ -318,7 +318,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--validators", type=Path, default=DEFAULT_VALIDATORS_FILE)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--start", type=int, default=300)
-    parser.add_argument("--end", type=int, default=440)
+    parser.add_argument("--end", type=int, default=550)
     parser.add_argument("--split-height", type=int, default=398)
     parser.add_argument(
         "--manual-end",
