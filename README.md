@@ -293,6 +293,8 @@ cd node-deploy
 
 ./test_attack_1_flow.sh
 
+./test_attack_1_flow.sh --turnlength8
+
 ./test_attack_1_flow.sh --epoch-interval epoch_200_interval_3000
 
 ./test_attack_1_flow.sh --epoch-interval epoch_1000_interval_450 --turnlength8
