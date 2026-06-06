@@ -2,315 +2,302 @@
 
 ## Introduction
 
-Attack 1 Experiment layout:
+This repository reproduces two consensus-safety attacks against a local 21-validator BSC
+(v1.6.6) cluster, plus matching "repair" experiments that check whether the chain
+re-converges once the attack stops.
 
-Attack 1 starts a 21-validator local BSC cluster and splits it into two logical network partitions:
+- **Attack 1 (network split).** The 21-validator cluster is split into two logical partitions,
+  and validator `node11` is intentionally duplicated so an extra instance can join the second
+  partition. After height `400` each partition keeps advancing and finalizing blocks on its own,
+  proving the network forked into two independently finalizing chains.
+- **Attack 2 (directed propagation).** Starting around height `398`, blocks are no longer
+  broadcast freely. A manual routing schedule forwards each block only to the next validator on
+  its branch, which grows two parallel chains (A and B). After the manual window (~height `411`)
+  both branches keep sealing and finalize independently while propagation stays branch-local.
+- **Repair experiments.** Same setup as attack 2, but **when the fork window ends the network
+  partition is also lifted**. This lets us observe whether the two branches re-converge into a
+  single canonical chain. `repair-code` repairs the attack-2 scenario and `repair-8-code` repairs
+  the attack-2 turn-length-8 scenario.
 
-- Group A: node `0..9` plus the A-side instance of node `11`.
-- Group B: node `10` and node `12..20`.
-- Node `11` is intentionally duplicated. The original `node11` starts with Group A, while a copied `node11-b`
-  instance is started later with Group B.
+**Turn length 1 vs 8.** Each attack ships in two turn-length variants. With turn length `1` a
+validator seals one block per turn; with turn length `8` it seals 8 consecutive blocks per turn
+(run via the `*_8` flow scripts and `bsc_cluster_*_8.sh`). Longer turns stretch the manual
+schedule window and therefore move the attack milestones to higher blocks. The block heights are
+defined per build in each `code/*/params/validators.go`:
 
-The script first builds the attack-1 `geth` binary and `create-validator`, resets the cluster, and starts the initial
-21 validators. After the chain reaches height `201`, it adds extra validators on both sides:
+- Attack 2, turn length `1` (`attack-2-code`): experiment window starts at height `398`
+  (`NetworkSplitStartHeight`) and the manual routing window ends at `411` (`NetworkSplitManualEnd`),
+  so branches finalize independently after height ~`411`.
+- Attack 2, turn length `8` (`attack-2-turnlen-8-code`): the window still starts at `398`, but the
+  manual routing window runs through `487` (`NetworkSplitManualEnd = 487`) because each validator
+  holds 8 consecutive blocks, so independent finalization is observed only after height ~`488`.
 
-- Group A adds validators `21..31`; registration transactions are sent through node0 RPC `8545`.
-- Group B adds validators `32..41`; registration transactions are sent through node10 RPC `8555`.
+(Attack 1's split height is set the same way via `NetworkSplitStartHeight` and shifts with the
+epoch/interval branch, e.g. `400` on `master` vs `998` on `epoch_1000_interval_450`.)
 
-After node0 reaches height `400`, the script starts the copied B-side `node11-b` instance with
-`BSC_NETWORK_SPLIT_GROUP=B`. The experiment succeeds when both node0 and node10 observe a
-`Parlia finalized block number changed` log after height `400`, showing that both partitions have advanced their
-finalized block independently.
+### Collected test data (`testdata/`)
 
-Simple sketch:
+Each `testdata/<config>/` directory holds the collected results for **all three experiment
+families (attack-1, attack-2, repair)** under one parameter configuration:
 
-```text
-  height
-    ^
-    |     Group A partition                              Group B partition
-    |  node0..9 + node11(A)                         node10, node12..20
-  0 |------------------------- common prefix -------------------------------> time
-201 | + add validators 21..31 through node0 RPC 8545
-    | + add validators 32..41 through node10 RPC 8555
-400 | start copied node11-b with BSC_NETWORK_SPLIT_GROUP=B
-    | A: finalized block changes on node0
-    | B: finalized block changes on node10
-    +---------------------------------------------------------------------> time
+| `testdata/` directory | Epoch | Interval | Turn length |
+| --- | --- | --- | --- |
+| `epoch_200_interval_1000_turnlength_1/` | 200 | 1000ms | 1 (`master`) |
+| `epoch_200_interval_3000_turnlength_1/` | 200 | 3000ms | 1 |
+| `epoch_200_interval_1000_turnlength_8/` | 200 | 1000ms | 8 (`master`) |
+| `epoch_1000_interval_450_turnlength_8/` | 1000 | 450ms | 8 |
+
+Each config directory contains a `data/` folder and a `csv/` folder.
+
+- **`data/`** holds the raw experiment output: `attack-1-testdata.zip`, `attack-2-testdata.zip`,
+  and `repair-testdata.zip`. Each archive contains the `bsc.log` files of all 21 cluster nodes
+  (node0..node20) for that run; these logs are the source the analysis scripts parse.
+- **`csv/`** holds the analysis outputs derived from those logs by the scripts in
+  `testdata/script/`. Each row is keyed by `slot` (block height). `benchmark_*` is the reference
+  (non-partitioned) value at that height, while `branch_a_*` / `branch_b_*` are the per-branch
+  values of the two partitions:
+
+| CSV file | Produced by | Columns | Meaning |
+| --- | --- | --- | --- |
+| `attack_1_finalized_heights.csv` | `analyze_attack_1_finalized_heights.py` | `slot, benchmark_finalized_height, branch_a_finalized_height, branch_b_finalized_height` | Finalized height (`newFinalized`) over time for the attack-1 split, read from node0 (branch A) and node10 (branch B). Shows the two partitions finalizing independently after the split. |
+| `attack_2_finalized_heights.csv` | `analyze_attack_2_finalized_heights.py` | `slot, benchmark_finalized_height, branch_a_finalized_height, branch_b_finalized_height` | Same finalized-height series for attack 2, with each node mapped to branch A/B from `validators.go`. |
+| `attack_2_total_difficulty.csv` | `analyze_attack_2_total_difficulty.py` | `slot, benchmark_total_difficulty, branch_a_total_difficulty, branch_b_total_difficulty` | Accumulated total difficulty per branch (from `Successfully seal and write new block` logs), used to compare the competing weight of chains A and B. |
+| `matching_attestations.csv` | `analyze_matching_attestations.py` | `slot, benchmark_attestations, g1_matching_attestations_on_CA, g2_matching_attestations_on_CB` | Per-slot count of matching vote attestations (from `assembleVoteAttestation` logs): the benchmark vote count vs. group-1 votes on chain A and group-2 votes on chain B. |
+| `repair_finalized_heights.csv` | `analyze_repair_finalized_heights.py` | `slot, benchmark_finalized_height, branch_a_finalized_height, branch_b_finalized_height` | Finalized-height series for the repair run; shows whether the branches re-converge once the partition is lifted. |
+| `repair_readme_branch_by_slot.csv` | repair analysis helper | `slot, common, A_branch, B_branch` | Branch assignment per slot (common prefix vs. branch A vs. branch B), i.e. which chain each height belongs to during the repair run. |
+
+`testdata/script/` also includes `check_attack2_schedule.py` / `check_attack2_8_schedule.py`
+(verify the manual block-routing schedule) and the turn-length-8 variants of the analyzers
+(`analyze_attack_2_8_*`, `analyze_repair_8_finalized_heights.py`).
+
+## Experiments and code layout
+
+Each `code/<name>` folder is its own git repository. The flow scripts in `node-deploy/` build a
+`geth` binary from that source, then drive the cluster. A `--epoch-interval NAME` flag makes the
+flow script `git checkout NAME` in the corresponding code repo before building; the default
+`master` branch is the `epoch_200_interval_1000` configuration.
+
+- **`code/attack-1-code`** → `node-deploy/test_attack_1_flow.sh`
+  - branches: `master` (= `epoch_200_interval_1000`), `epoch_1000_interval_450`,
+    `epoch_200_interval_3000`
+  - `--turnlength8` switches the cluster script from `bsc_cluster_1.sh` to `bsc_cluster_1_8.sh`.
+- **`code/attack-2-code`** → `node-deploy/test_attack_2_flow.sh`
+  - branches: `master` (= `epoch_200_interval_1000`), `epoch_200_interval_3000`
+- **`code/attack-2-turnlen-8-code`** → `node-deploy/test_attack_2_8_flow.sh`
+  - branches: `master` (= `epoch_200_interval_1000`), `epoch_1000_interval_450`
+- **`code/repair-code`** (repairs attack-2) → `node-deploy/repair.sh`
+  - branches: `master` (= `epoch_200_interval_1000`), `epoch_200_interval_3000`
+- **`code/repair-8-code`** (repairs attack-2 turn-length-8) → `node-deploy/repair_8.sh`
+  - branches: `master` (= `epoch_200_interval_1000`), `epoch_1000_interval_450`
+
+## Docker
+
+> Docker images are the recommended way to run each experiment in a clean, isolated environment.
+> One image is provided per experiment; build it once, then run the experiment from the image.
+> (Dockerfiles live under `docker/`.)
+
+### Build images
+
+```bash
+# build the shared build-environment base, then all per-experiment images
+./docker/build.sh
 ```
 
+### Run an experiment
 
-Attack 2 Experiment layout:
+```bash
+# attack 1 (default config)
+docker run --rm bsc-attack-1
 
-Attack 2 starts from the same 21-validator local BSC cluster, then creates two directed-propagation branches starting
-at height `398`. During the manual schedule window, nodes do not broadcast blocks freely. Each scheduled block is sent
-only to the next validator on that branch.
+# attack 1, turn length 8 + a specific epoch/interval branch
+docker run --rm -e TURNLENGTH8=1 -e EPOCH_INTERVAL=epoch_1000_interval_450 bsc-attack-1
 
-Before the split, the script starts the extra validators but keeps their registration transactions out of blocks. At
-height `399`, each branch packs a different validator-add transaction set:
+# attack 2 / attack 2 turn length 8
+docker run --rm bsc-attack-2
+docker run --rm bsc-attack-2-turnlen-8
 
-- A chain: `399(6c)` packs the transactions that add validators `21..31`.
-- B chain: `399'(20)` packs the transactions that add validators `32..41`.
-
-The manual routing schedule runs through `410/410'`. After that, the branch-specific validator sets continue sealing
-naturally, while block propagation remains partitioned: A-side validators and A-side added validators only receive A
-branch blocks, and B-side validators and B-side added validators only receive B branch blocks.
-
-Two parallel chains:
-
-```text
-  difficulty :            2    →    1    →    2    →    1    →    2    →    1    →    2    →    1    →    2    →    1    →    1    →    2    →    1
-  Chain A (no prime):  398(fe) → 399(6c) → 400(29) → 401(a8) → 402(50) → 403(bb) → 404(51) → 405(c1) → 406(5e) → 407(d3) → 408(f7) → 409(9b) → 410(3a)
+# repair experiments
+docker run --rm bsc-repair
+docker run --rm bsc-repair-8
 ```
 
-```text
-  difficulty :            1     →    2     →    1     →    2     →    1     →     2    →    1     →    2     →    1     →    1     →    2     →    1     →    2
-  Chain B (prime):     398'(5f) → 399'(20) → 400'(9b) → 401'(3a) → 402'(ab) → 403'(511) → 404'(bc) → 405'(5a) → 406'(d2) → 407'(e9) → 408'(6c) → 409'(29) → 410'(a8)
-```
+Configuration is passed through environment variables that the flow scripts already understand:
 
-Broadcast routing:
+- `EPOCH_INTERVAL=NAME` — same as `--epoch-interval NAME` (must be a valid branch for that experiment).
+- `TURNLENGTH8=1` — same as `--turnlength8` (attack 1 only).
 
-```text
-  398  fe → 6c   |  398' 5f → 20
-  399  6c → 29   |  399' 20 → 9b
-  400  29 → a8   |  400' 9b → 3a
-  401  a8 → 50   |  401' 3a → ab
-  402  50 → bb   |  402' ab → 511
-  403  bb → 51   |  403' 511 → bc
-  404  51 → c1   |  404' bc → 5a
-  405  c1 → 5e   |  405' 5a → d2
-  406  5e → d3   |  406' d2 → e9
-  407  d3 → f7   |  407' e9 → 6c
-  408  f7 → 9b   |  408' 6c → 29
-  409  9b → 3a   |  409' 29 → a8
-  410  3a → ab   |  410' a8 → 50
-  after 410, both branches continue sealing naturally with branch-local propagation.
-```
+## Manual build & execution
 
-Design notes:
-For every scheduled reorg recipient, the TD of the recipient's current chain is strictly smaller than the broadcast
-block's trueTD (= block.TD - block.Diff). Only under this condition will `chainSync.nextSyncOp` trigger the downloader
-to fetch missing ancestors. After the recipient finishes the reorg, it produces the next scheduled block. From `411`
-onward, the explicit sealing gate is lifted and each branch seals naturally, but block propagation remains isolated by
-branch.
+We also provide a fully manual setup for users who prefer to inspect and customize the testing
+environment. See the [Appendix](#appendix) for the complete dependency list and setup steps.
 
-## 🚀 Quick Access
+## Attack success criteria
 
-## 📦 Recommended Setup: Docker
+### Attack 1
 
-### Prerequisites
-
-### Running attack 1
-
-### Running attack 2
-
-
-## 🛠️ Optional: Manual Build & Execution
-
-We also provide a fully manual setup method for users or reviewers who prefer to inspect and customize the testing environment (See [Appendix](#appendix)).
-
-## 🧪 Attack Success Criteria
-
-### For attack 1
-
-The attack is considered successful when the script prints finalized block changes from both node0 and node10 after
-height `400`, for example:
+The attack succeeds when both `node0` (partition A) and `node10` (partition B) print a `Parlia
+finalized block number changed` log after height `400`:
 
 ```text
 [2026-05-04 17:51:43] node0 matched log line:
-t=05-04|17:51:43.012 lvl=info msg="Parlia finalized block number changed" header=413 prevFinalized=396 newFinalized=411 targetNumber=412 sourceHash=0xa53b8dd08c1990b73388061b115d7332235f3d2d0d755ae1d25a83f4407ad6fa targetHash=0x0b616e141d5d0a4206f2e49ea71243538078665310a613afec5e4aaf138a585a
+t=05-04|17:51:43.012 lvl=info msg="Parlia finalized block number changed" header=413 prevFinalized=396 newFinalized=411 targetNumber=412 sourceHash=0x429c73a6e9...
 [2026-05-04 17:52:43] node10 matched log line:
-t=05-04|17:52:43.035 lvl=info msg="Parlia finalized block number changed" header=430 prevFinalized=396 newFinalized=428 targetNumber=429 sourceHash=0x0047cf78fe366438f3a32b458bd40a6c78529b5cf47c254d3943800d41fda3fa targetHash=0x000fa3e16f902ec4cb769192186dd7952665fa412357c03bd8aee542b45673c2
+t=05-04|17:52:43.035 lvl=info msg="Parlia finalized block number changed" header=413 prevFinalized=396 newFinalized=411 targetNumber=412 sourceHash=0x9b20451f...
 ```
 
-### For attack 2
+How to read it: both lines share the **same `prevFinalized=396`** (the common pre-split finalized
+base), but they report **different `sourceHash`** for the same `targetNumber`. Two partitions
+finalizing different blocks on top of the same base is the safety violation, so a differing
+`sourceHash` (with identical `prevFinalized`) means the attack succeeded.
 
-The attack is considered successful when both branches finalize independently after the manual split window. The
-automation watches multiple branch-local candidate logs:
+### Attack 2
 
-- A chain: nodes for `412(511)`, `413(bc)`, `414(5a)`, and `415(d2)`.
-- B chain: nodes for `411'(50)`, `412'(bb)`, `413'(51)`, `414'(c1)`, and `415'(5e)`.
+The attack succeeds when both branches finalize independently after the manual split window. The
+automation watches branch-local candidate logs and requires one `Parlia finalized block number
+changed` line with `header >= 411` for each branch, then waits until both branches pass height
+`450` before stopping the cluster:
 
-The terminal should print one `Parlia finalized block number changed` line with `header >= 411` for each branch. The
-script then waits until both branches exceed height `450` before stopping the cluster.
+```text
+[2026-05-04 18:11:10] A-chain matched finalized log in .local/node1/bsc.log:
+t=05-04|18:11:10.004 lvl=info msg="Parlia finalized block number changed" header=413 prevFinalized=396 newFinalized=411 targetNumber=412 sourceHash=0x6c1d2f...
+[2026-05-04 18:11:52] B-chain matched finalized log in .local/node0/bsc.log:
+t=05-04|18:11:52.061 lvl=info msg="Parlia finalized block number changed" header=413 prevFinalized=396 newFinalized=411 targetNumber=412 sourceHash=0x20a8bb...
+```
 
+Same reading as attack 1: identical `prevFinalized=396` but a **different `sourceHash`** on the A
+and B branches means the two chains finalized independently, i.e. the attack succeeded.
 
-## 💻 Source Code
+### Repair
 
-- BSC base (v1.6.6): [https://github.com/bnb-chain/bsc/tree/v1.6.6](https://github.com/bnb-chain/bsc/tree/v1.6.6)
-  
-  - attack 1 code : ./code/attack-1-code.zip
-  - attack 2 code : ./code/attack-2-code.zip
-- Node deployment script: [https://github.com/bnb-chain/node-deploy](https://github.com/bnb-chain/node-deploy)
+The repair run uses the same flow, but after the fork window the partition is lifted. Success here
+is the **opposite** of the attacks: once propagation is restored, the two branches must
+**re-converge** onto a single canonical chain. Concretely, the A-chain and B-chain `Parlia
+finalized block number changed` lines should report the **same `sourceHash`** (and the same
+`prevFinalized` / `targetNumber`):
 
-## 📄Appendix
+```text
+A-chain finalized log:
+... msg="Parlia finalized block number changed" header=... prevFinalized=... newFinalized=... targetNumber=N sourceHash=0xSAME...
+B-chain finalized log:
+... msg="Parlia finalized block number changed" header=... prevFinalized=... newFinalized=... targetNumber=N sourceHash=0xSAME...
+```
 
-This section outlines the complete manual installation process, including environment setup, dependency installation, and attack execution using raw scripts and source code.
+When both branches show the identical `sourceHash` for the same `targetNumber`, the fork has
+healed and the repair succeeded. The collected `repair_*` CSVs under `testdata/<config>/csv/`
+capture this convergence behavior.
 
-> ⚠️ **Before you begin**, please ensure the following software and system packages are installed on your local machine:
+## Appendix
 
-- Ubuntu 20.04/22.04
-- nodejs: 18.20.2
-- npm: 6.14.6
-- go: 1.21+
-- python3: 3.12+
-- docker: 27.5.1
-- foundry: 1.1.0
-- poetry: 2.0.0
-- jq: 1.7
+This section outlines the complete manual installation process: environment setup, dependency
+installation, and attack execution from source.
+
+> ⚠️ **Before you begin**, ensure the following are installed (matching `install-dev.sh`):
+
+- Ubuntu 20.04 / 22.04
+- Go: 1.21.10
+- Node.js: 18.20.2, npm: 6.14.6
+- Foundry: v1.2.1
+- python3: 3.12+ (with `python3.12-venv`)
+- poetry
+- jq, unzip
 
 ### Setup steps
 
-1. Unzip and enter the project directory
+1. Install system dependencies and toolchains:
 
 ```bash
-unzip node-deploy.zip
-cd node-deploy
-```
-
-2. Create and activate a virtual environment
-
-```
-# Create the virtual environment (if the venv package is not installed)
-python3 -m venv path/to/venv
-
-# Create virtual environments
-apt install python3.12-venv
-
-# Activate the virtual environment
-source path/to/venv/bin/activate
-```
-
-3. Install dependencies
-
-```
 chmod +x install-dev.sh
 sudo ./install-dev.sh
+```
+
+2. Create and activate a Python virtual environment, then install requirements:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip3 install -r node-deploy/requirements.txt
 ```
 
-4. Compile the geth binary
+The flow scripts below also create/activate `node-deploy/.venv` automatically if you skip this step.
 
-```bash
-unzip ./code/attack-1-code.zip
-unzip ./code/attack-2-code.zip
-unzip ./code/attack-2-turnlen-8-code.zip
-unzip ./code/repair-code.zip
-unzip ./code/repair-8-code.zip
-```
+### Launching experiments
 
-### Launching attack simulation
+Run each experiment from `node-deploy/`. Recompile happens automatically inside each flow script
+(`make geth` against the matching `code/*` repo). We recommend running each attack in a clean,
+isolated environment and **not** running different attacks in parallel under the same environment.
 
-1. Start attack 1
+1. Attack 1
 
 ```bash
 cd node-deploy
 ./test_attack_1_flow.sh
-```
-
-2. Start attack 1 with turnlength 8
-
-```bash
-cd node-deploy
 ./test_attack_1_flow.sh --turnlength8
+./test_attack_1_flow.sh --epoch-interval epoch_200_interval_3000
+./test_attack_1_flow.sh --epoch-interval epoch_1000_interval_450 --turnlength8
 ```
 
+The attack-1 flow:
 
-The script performs the full attack-1 flow:
-
-- Build the latest `code/attack-1-code` geth binary with `make geth`.
-- Build `node-deploy/create-validator` with `go build`.
-- Install the geth binary into `node-deploy/bin/geth`.
-- Prepare the Python virtual environment and install `node-deploy/requirements.txt`.
-- Reset and start the 21-node validator cluster.
-- Wait for height `201`, then add Group A validators `21..31` through node0 RPC `8545`.
-- Add Group B validators `32..41` through node10 RPC `8555`.
-- Wait for height `400`, copy `node11` to `node11-b`, and start the B-side instance with
+- Builds `code/attack-1-code` `geth` with `make geth` (after checking out the requested branch).
+- Builds `node-deploy/create-validator` and installs the binary into `node-deploy/bin/geth`.
+- Prepares the Python venv and installs `node-deploy/requirements.txt`.
+- Resets and starts the 21-node cluster.
+- Waits for height `201`, then adds Group A validators `21..31` (via node0 RPC `8545`) and Group B
+  validators `32..41` (via node10 RPC `8555`).
+- Waits for height `400`, copies `node11` to `node11-b`, and starts the B-side instance with
   `BSC_NETWORK_SPLIT_GROUP=B`.
-- Monitor node0 and node10 logs until both print `Parlia finalized block number changed`.
-- Stop the cluster with `bash -x ./bsc_cluster_1.sh stop`.
+- Monitors node0 and node10 until both print `Parlia finalized block number changed`, then stops
+  the cluster.
 
-The run is successful when the terminal shows matched finalized-block-change logs for both node0 and node10, as
-shown in the [attack success criteria](#for-attack-1).
-
-We recommend running each attack in a clean and isolated environment to ensure independent evaluation. We do not recommend running different attacks in parallel under the same environment.
-
-Please recompile the corresponding binary before running the following attacks.
-
-3. Start attack 2
+2. Attack 2
 
 ```bash
 cd node-deploy
 ./test_attack_2_flow.sh
+./test_attack_2_flow.sh --epoch-interval epoch_200_interval_3000
 ```
 
-4. Start attack 2 with turnlength 8
+3. Attack 2 (turn length 8)
 
 ```bash
 cd node-deploy
-./test_attack_2_turnlen_8_flow.sh
+./test_attack_2_8_flow.sh
+./test_attack_2_8_flow.sh --epoch-interval epoch_1000_interval_450
 ```
 
-The script performs the full attack-2 flow:
+The attack-2 flow:
 
-- Build the latest `code/attack-2-code` geth binary with `make geth`.
-- Build `node-deploy/create-validator` with `go build`.
-- Install the geth binary into `node-deploy/bin/geth`.
-- Prepare the Python virtual environment and install `node-deploy/requirements.txt`.
-- Reset and start the 21-node validator cluster with `bsc_cluster_2.sh`.
-- Wait for height `201`, then start and register A-side extra validators `21..31` through the `398(fe)` node RPC
-  (`8553`).
-- Start and register B-side extra validators `32..41` through the `398'(5f)` node RPC (`8557`).
-- Wait for attack-2 branch-local finalization after height `411`.
-- Wait until both branches exceed height `450`, then stop the cluster.
+- Builds the matching `geth` (`code/attack-2-code` or `code/attack-2-turnlen-8-code`) and
+  `create-validator`, installs the binary into `node-deploy/bin/geth`.
+- Resets and starts the 21-node cluster (`bsc_cluster_2.sh` / `bsc_cluster_2_8.sh`).
+- Waits for height `201`, then registers A-side validators `21..31` and B-side validators `32..41`.
+- Waits for branch-local finalization after height `411`, then waits until both branches exceed the
+  configured height before stopping the cluster.
 
+4. Repair experiments
 
-5. Start repair experiment
 ```bash
 cd node-deploy
 ./repair.sh
-```
-
-6. Start repair experiment with turnlength 8
-```bash
-cd node-deploy
+./repair.sh --epoch-interval epoch_200_interval_3000
 ./repair_8.sh
+./repair_8.sh --epoch-interval epoch_1000_interval_450
 ```
 
+`repair.sh` runs the attack-2 flow with `code/repair-code`, and `repair_8.sh` runs the attack-2
+turn-length-8 flow with `code/repair-8-code`. Both lift the network partition once the fork window
+ends so you can observe whether the branches converge.
 
-## 🐳 Building Docker Images
+## Source code
 
-### Build Prerequisites
-
-### Building Attack 1 Image
-
-### Building Attack 2 Image
-
-### Running Attacks Using Local Docker Images
+- BSC base (v1.6.6): [https://github.com/bnb-chain/bsc/tree/v1.6.6](https://github.com/bnb-chain/bsc/tree/v1.6.6)
+  - attack 1 code: `code/attack-1-code` (`code/attack-1-code.zip`)
+  - attack 2 code: `code/attack-2-code` (`code/attack-2-code.zip`)
+  - attack 2 turn-length-8 code: `code/attack-2-turnlen-8-code` (`code/attack-2-turnlen-8-code.zip`)
+  - repair code: `code/repair-code` (`code/repair-code.zip`)
+  - repair turn-length-8 code: `code/repair-8-code` (`code/repair-8-code.zip`)
+- Node deployment scripts: [https://github.com/bnb-chain/node-deploy](https://github.com/bnb-chain/node-deploy)
 
 ## Contribution
 
 - For questions or bug reports, please open a GitHub issue in this repository.
-
-./test_attack_1_flow.sh
-
-./test_attack_1_flow.sh --turnlength8
-
-./test_attack_1_flow.sh --epoch-interval epoch_200_interval_3000
-
-./test_attack_1_flow.sh --epoch-interval epoch_1000_interval_450 --turnlength8
-
-./test_attack_2_flow.sh 
-
-./test_attack_2_flow.sh --epoch-interval epoch_200_interval_3000
-
-./repair.sh
- 
-./repair.sh --epoch-interval epoch_200_interval_3000
-
-./test_attack_2_8_flow.sh 
-
-./test_attack_2_8_flow.sh --epoch-interval epoch_1000_interval_450
-
-./repair_8.sh
- 
-./repair_8.sh --epoch-interval epoch_1000_interval_450
