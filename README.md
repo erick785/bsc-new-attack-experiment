@@ -93,38 +93,97 @@ flow script `git checkout NAME` in the corresponding code repo before building; 
 ## Docker
 
 > Docker images are the recommended way to run each experiment in a clean, isolated environment.
-> One image is provided per experiment; build it once, then run the experiment from the image.
-> (Dockerfiles live under `docker/`.)
+> The `docker/` directory holds a shared base image plus one image per experiment; build them
+> once, then run any experiment from its image.
+
+The images under `docker/`:
+
+| Dockerfile | Image tag | Runs |
+| --- | --- | --- |
+| `docker/base.Dockerfile` | `bsc-attack-base:latest` | shared build env (Go 1.24, Node 18.20.2/npm 6.14.6, Foundry v1.2.1, python3.12, poetry, jq) + repo source |
+| `docker/attack-1.Dockerfile` | `bsc-attack-1` | `test_attack_1_flow.sh` |
+| `docker/attack-2.Dockerfile` | `bsc-attack-2` | `test_attack_2_flow.sh` |
+| `docker/attack-2-turnlen-8.Dockerfile` | `bsc-attack-2-turnlen-8` | `test_attack_2_8_flow.sh` |
+| `docker/repair.Dockerfile` | `bsc-repair` | `repair.sh` |
+| `docker/repair-8.Dockerfile` | `bsc-repair-8` | `repair_8.sh` |
+
+### Pull prebuilt images from Docker Hub
+
+Prebuilt images are published under the `erick785` namespace, so you can run any experiment
+without building anything locally.
+
+```bash
+# pull every experiment image
+docker pull erick785/bsc-new-attack-1
+docker pull erick785/bsc-new-attack-2
+docker pull erick785/bsc-new-attack-2-turnlen-8
+docker pull erick785/bsc-new-repair
+docker pull erick785/bsc-new-repair-8
+```
+
+
+| Experiment | Docker Hub image | Local build tag |
+| --- | --- | --- |
+| Attack 1 | `erick785/bsc-new-attack-1` | `bsc-attack-1` |
+| Attack 2 | `erick785/bsc-new-attack-2` | `bsc-attack-2` |
+| Attack 2 (turn length 8) | `erick785/bsc-new-attack-2-turnlen-8` | `bsc-attack-2-turnlen-8` |
+| Repair | `erick785/bsc-new-repair` | `bsc-repair` |
+| Repair (turn length 8) | `erick785/bsc-new-repair-8` | `bsc-repair-8` |
 
 ### Build images
 
 ```bash
-# build the shared build-environment base, then all per-experiment images
+# build the shared base, then all per-experiment images
 ./docker/build.sh
+# or build a single experiment (still builds the base first)
+./docker/build.sh attack-1
 ```
+
+The base image is built from the repo root so it can copy `code/*` (with their `.git`) and
+`node-deploy/`; large runtime/data directories are excluded by `.dockerignore`. The
+per-experiment images only set an entrypoint, so they build from the small `docker/` context.
 
 ### Run an experiment
 
+The image entrypoint is the flow script, so any flag accepted by the script can be appended after
+the image name. Each command below is the Docker equivalent of the matching `./<script>` call.
+
 ```bash
-# attack 1 (default config)
+# attack 1  (./test_attack_1_flow.sh ...)
 docker run --rm bsc-attack-1
+docker run --rm bsc-attack-1 --turnlength8
+docker run --rm bsc-attack-1 --epoch-interval epoch_200_interval_3000
+docker run --rm bsc-attack-1 --epoch-interval epoch_1000_interval_450 --turnlength8
 
-# attack 1, turn length 8 + a specific epoch/interval branch
-docker run --rm -e TURNLENGTH8=1 -e EPOCH_INTERVAL=epoch_1000_interval_450 bsc-attack-1
-
-# attack 2 / attack 2 turn length 8
+# attack 2  (./test_attack_2_flow.sh ...)
 docker run --rm bsc-attack-2
-docker run --rm bsc-attack-2-turnlen-8
+docker run --rm bsc-attack-2 --epoch-interval epoch_200_interval_3000
 
-# repair experiments
+# attack 2, turn length 8  (./test_attack_2_8_flow.sh ...)
+docker run --rm bsc-attack-2-turnlen-8
+docker run --rm bsc-attack-2-turnlen-8 --epoch-interval epoch_1000_interval_450
+
+# repair  (./repair.sh ...)
 docker run --rm bsc-repair
+docker run --rm bsc-repair --epoch-interval epoch_200_interval_3000
+
+# repair, turn length 8  (./repair_8.sh ...)
 docker run --rm bsc-repair-8
+docker run --rm bsc-repair-8 --epoch-interval epoch_1000_interval_450
 ```
 
-Configuration is passed through environment variables that the flow scripts already understand:
+The same options can also be passed as environment variables that the flow scripts understand:
 
 - `EPOCH_INTERVAL=NAME` — same as `--epoch-interval NAME` (must be a valid branch for that experiment).
 - `TURNLENGTH8=1` — same as `--turnlength8` (attack 1 only).
+
+```bash
+docker run --rm -e TURNLENGTH8=1 -e EPOCH_INTERVAL=epoch_1000_interval_450 bsc-attack-1
+```
+
+Each run starts a 21+ node cluster, so give Docker enough CPU/RAM. Node logs and data are written
+to `node-deploy/.local` inside the container; mount a volume there to keep the results after the
+container exits, e.g. `docker run --rm -v "$PWD/out:/opt/bsc-attack/node-deploy/.local" bsc-attack-1`.
 
 ## Manual build & execution
 
