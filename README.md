@@ -130,6 +130,33 @@ docker pull erick785/bsc-new-repair-8
 | Repair | `erick785/bsc-new-repair` | `bsc-repair` |
 | Repair (turn length 8) | `erick785/bsc-new-repair-8` | `bsc-repair-8` |
 
+The image entrypoint is the flow script, so flags can be appended after the image name (same as
+the local-build commands in [Run an experiment](#run-an-experiment)):
+
+```bash
+# attack 1  (./test_attack_1_flow.sh ...)
+docker run --rm erick785/bsc-new-attack-1
+docker run --rm erick785/bsc-new-attack-1 --turnlength8
+docker run --rm erick785/bsc-new-attack-1 --epoch-interval epoch_200_interval_3000
+docker run --rm erick785/bsc-new-attack-1 --epoch-interval epoch_1000_interval_450 --turnlength8
+
+# attack 2  (./test_attack_2_flow.sh ...)
+docker run --rm erick785/bsc-new-attack-2
+docker run --rm erick785/bsc-new-attack-2 --epoch-interval epoch_200_interval_3000
+
+# attack 2, turn length 8  (./test_attack_2_8_flow.sh ...)
+docker run --rm erick785/bsc-new-attack-2-turnlen-8
+docker run --rm erick785/bsc-new-attack-2-turnlen-8 --epoch-interval epoch_1000_interval_450
+
+# repair  (./repair.sh ...)
+docker run --rm erick785/bsc-new-repair
+docker run --rm erick785/bsc-new-repair --epoch-interval epoch_200_interval_3000
+
+# repair, turn length 8  (./repair_8.sh ...)
+docker run --rm erick785/bsc-new-repair-8
+docker run --rm erick785/bsc-new-repair-8 --epoch-interval epoch_1000_interval_450
+```
+
 ### Build images
 
 ```bash
