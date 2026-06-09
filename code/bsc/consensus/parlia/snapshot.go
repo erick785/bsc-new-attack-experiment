@@ -404,7 +404,7 @@ func (s *Snapshot) apply(headers []*types.Header, chain consensus.ChainHeaderRea
 			}
 			newVals := make(map[common.Address]*ValidatorInfo, len(newValArr))
 			for idx, val := range newValArr {
-				if !chainConfig.IsLuban(header.Number) {
+				if !chainConfig.IsLuban(header.Number) || len(voteAddrs) != len(newValArr) {
 					newVals[val] = &ValidatorInfo{}
 				} else {
 					newVals[val] = &ValidatorInfo{
