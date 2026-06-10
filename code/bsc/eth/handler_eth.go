@@ -23,11 +23,13 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/parlia"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 // ethHandler implements the eth.Backend interface to handle the various network
@@ -143,6 +145,35 @@ func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, packet *eth.NewBlockPa
 	}
 	if packet.Bal != nil && h.chain.Engine().VerifyBAL(block, packet.Bal) == nil {
 		block = block.WithBAL(packet.Bal)
+	}
+
+	// Attack experiment ingress handling at the attack slot.
+	if cfg := params.Attack(); cfg.Active && block.NumberU64() == cfg.Slot {
+		// On the two designated UK backups, drop the opposing sibling so the local
+		// in-progress seal is not aborted by an incoming same-height block. Both
+		// b1 and b2 thus get produced.
+		if cfg.Region == "uk" {
+			if pa, ok := h.chain.Engine().(*parlia.Parlia); ok {
+				self := pa.ConsensusAddress()
+				if (cfg.IsB1(self) || cfg.IsB2(self)) && block.Coinbase() != self {
+					log.Info("[ATTACK] dropping opposing sibling to preserve own seal",
+						"self", self.Hex(), "got", cfg.LabelOf(block.Coinbase()),
+						"coinbase", block.Coinbase().Hex(), "slot", block.NumberU64())
+					return nil
+				}
+			}
+		}
+		// On Singapore nodes, record which sibling arrives first (this is the block
+		// the node will vote for). The first such log line is the experiment result.
+		if cfg.Region == "sg" {
+			from := ""
+			if addr := peer.RemoteAddr(); addr != nil {
+				from = addr.String()
+			}
+			log.Info("[ATTACK][SG] received slot-t block",
+				"label", cfg.LabelOf(block.Coinbase()), "coinbase", block.Coinbase().Hex(),
+				"hash", block.Hash(), "from", from, "recvUnixMs", time.Now().UnixMilli())
+		}
 	}
 
 	// Schedule the block for import

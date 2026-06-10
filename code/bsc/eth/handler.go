@@ -49,6 +49,7 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/p2p/enode"
+	"github.com/ethereum/go-ethereum/params"
 )
 
 const (
@@ -199,6 +200,19 @@ type handler struct {
 
 	handlerStartCh chan struct{}
 	handlerDoneCh  chan struct{}
+
+	// Attack experiment: UK-side hold-and-release buffer for the two sibling
+	// backup blocks (b1/b2) at the attack slot.
+	attackMu       sync.Mutex
+	attackBuf      map[string]*attackHeldBlock
+	attackReleased bool
+}
+
+// attackHeldBlock is a sibling backup block buffered on a UK node until both
+// siblings (b1 and b2) are present, after which they are released together.
+type attackHeldBlock struct {
+	block *types.Block
+	td    *big.Int
 }
 
 // newHandler returns a handler for all Ethereum chain management protocol.
@@ -814,6 +828,19 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 			return
 		}
 	}
+
+	// Attack experiment: on UK nodes the two sibling backup blocks at the attack
+	// slot are not broadcast freely. They are propagated only inside the UK and
+	// buffered; once both siblings are collected they are released together —
+	// b2 -> US immediately, b1 -> Singapore after LEAD_TIME_MS.
+	if cfg := params.Attack(); cfg.Active && cfg.Region == "uk" && block.NumberU64() == cfg.Slot {
+		cb := block.Coinbase()
+		if cfg.IsB1(cb) || cfg.IsB2(cb) {
+			h.attackUKBroadcast(block, cfg)
+			return
+		}
+	}
+
 	hash := block.Hash()
 	peers := h.peers.peersWithoutBlock(hash)
 
@@ -900,6 +927,100 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 		}
 		log.Debug("Announced block", "hash", hash, "recipients", len(peers), "duration", common.PrettyDuration(time.Since(block.ReceivedAt)))
 	}
+}
+
+// attackPeerRegion classifies a peer by its remote IP into "uk"/"us"/"sg"/"".
+func (h *handler) attackPeerRegion(p *ethPeer, cfg *params.AttackConfig) string {
+	addr := p.remoteAddr()
+	if addr == nil {
+		return ""
+	}
+	return cfg.RegionOfAddr(addr.String())
+}
+
+// attackBlockTd computes the total difficulty of a not-yet-imported block.
+func (h *handler) attackBlockTd(block *types.Block) *big.Int {
+	parent := h.chain.GetBlock(block.ParentHash(), block.NumberU64()-1)
+	if parent == nil {
+		return nil
+	}
+	return new(big.Int).Add(block.Difficulty(), h.chain.GetTd(block.ParentHash(), block.NumberU64()-1))
+}
+
+// attackSendToRegion sends a block to every peer located in the given region.
+func (h *handler) attackSendToRegion(region string, block *types.Block, td *big.Int, cfg *params.AttackConfig) {
+	hash := block.Hash()
+	sent := 0
+	for _, p := range h.peers.peersWithoutBlock(hash) {
+		if h.attackPeerRegion(p, cfg) == region {
+			p.AsyncSendNewBlock(block, td)
+			sent++
+		}
+	}
+	log.Info("[ATTACK] directed send",
+		"region", region, "label", cfg.LabelOf(block.Coinbase()),
+		"number", block.NumberU64(), "hash", hash, "peers", sent)
+}
+
+// attackUKBroadcast implements the UK-side hold-and-release of the two sibling
+// backup blocks. It is only called on UK nodes for attack-slot blocks mined by
+// the two designated backups (b1/b2).
+//
+//   - The block is propagated immediately to other UK peers (intra-datacenter,
+//     sub-millisecond) so that relay UK nodes collect both siblings. The two
+//     mining nodes themselves never see the opposing sibling (it is dropped on
+//     ingress, see handleBlockBroadcast) so both seal successfully.
+//   - Once a node holds both b1 and b2, it releases them together: b2 -> US now,
+//     b1 -> Singapore after LEAD_TIME_MS. Duplicate sends from multiple relay
+//     nodes are harmless (receivers dedup via knownBlocks).
+func (h *handler) attackUKBroadcast(block *types.Block, cfg *params.AttackConfig) {
+	td := h.attackBlockTd(block)
+	if td == nil {
+		log.Error("[ATTACK] cannot propagate dangling sibling", "number", block.Number(), "hash", block.Hash())
+		return
+	}
+	label := cfg.LabelOf(block.Coinbase())
+
+	// 1) propagate to UK peers only, so every UK relay node collects both siblings.
+	hash := block.Hash()
+	for _, p := range h.peers.peersWithoutBlock(hash) {
+		if h.attackPeerRegion(p, cfg) == "uk" {
+			p.AsyncSendNewBlock(block, td)
+		}
+	}
+
+	// 2) buffer this sibling; release externally once both are present.
+	h.attackMu.Lock()
+	if h.attackBuf == nil {
+		h.attackBuf = make(map[string]*attackHeldBlock, 2)
+	}
+	if _, dup := h.attackBuf[label]; !dup {
+		h.attackBuf[label] = &attackHeldBlock{block: block, td: td}
+		log.Info("[ATTACK] UK buffered sibling", "label", label, "number", block.NumberU64(), "hash", hash)
+	}
+	b1, has1 := h.attackBuf["b1"]
+	b2, has2 := h.attackBuf["b2"]
+	if !has1 || !has2 || h.attackReleased {
+		h.attackMu.Unlock()
+		return
+	}
+	h.attackReleased = true
+	h.attackMu.Unlock()
+
+	log.Info("[ATTACK] UK collected both siblings, releasing together",
+		"slot", block.NumberU64(), "leadTimeMs", cfg.LeadTimeMs,
+		"b1", b1.block.Hash(), "b2", b2.block.Hash())
+
+	// b2 -> US immediately (t0).
+	h.attackSendToRegion("us", b2.block, b2.td, cfg)
+	// b1 -> Singapore after the configured lead time (t0 + lead_time).
+	lead := time.Duration(cfg.LeadTimeMs) * time.Millisecond
+	go func() {
+		if lead > 0 {
+			time.Sleep(lead)
+		}
+		h.attackSendToRegion("sg", b1.block, b1.td, cfg)
+	}()
 }
 
 // needFullBroadcastInEVN checks if the block should be broadcast to EVN peers

@@ -1730,6 +1730,21 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		return nil
 	}
 
+	// Attack experiment seal gate (does NOT touch backoff): at the attack slot,
+	// the in-turn validator stays silent and only the two designated UK backups
+	// (b1/b2) are allowed to seal, so exactly two sibling backup blocks are produced.
+	if cfg := params.Attack(); cfg.ActiveAt(number) {
+		if cfg.InturnSilence && snap.inturn(val) {
+			log.Info("[ATTACK] in-turn validator stays silent at attack slot", "val", val.Hex(), "slot", number)
+			return nil
+		}
+		if !cfg.IsB1(val) && !cfg.IsB2(val) {
+			log.Info("[ATTACK] non-designated validator suppressed at attack slot", "val", val.Hex(), "slot", number)
+			return nil
+		}
+		log.Info("[ATTACK] designated backup sealing sibling block", "val", val.Hex(), "label", cfg.LabelOf(val), "slot", number, "diff", header.Difficulty)
+	}
+
 	// Sweet, the protocol permits us to sign the block, wait for our time
 	delay := p.delayForRamanujanFork(snap, header)
 
