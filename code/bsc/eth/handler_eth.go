@@ -156,9 +156,14 @@ func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, packet *eth.NewBlockPa
 			if pa, ok := h.chain.Engine().(*parlia.Parlia); ok {
 				self := pa.ConsensusAddress()
 				if (cfg.IsB1(self) || cfg.IsB2(self)) && block.Coinbase() != self {
-					log.Info("[ATTACK] dropping opposing sibling to preserve own seal",
+					// This is the opposing sibling. Do NOT import it (that would
+					// abort/replace our own seal); instead hand it to the hold-and
+					// -release buffer so this node collects BOTH siblings and can
+					// drive the timed directed send (b2 -> US now, b1 -> SG + lead).
+					log.Info("[ATTACK] collecting opposing sibling for release (not imported)",
 						"self", self.Hex(), "got", cfg.LabelOf(block.Coinbase()),
 						"coinbase", block.Coinbase().Hex(), "slot", block.NumberU64())
+					(*handler)(h).attackUKBroadcast(block, cfg)
 					return nil
 				}
 			}
