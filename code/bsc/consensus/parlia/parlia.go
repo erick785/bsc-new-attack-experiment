@@ -1734,11 +1734,13 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// the in-turn validator stays silent and only the two designated UK backups
 	// (b1/b2) are allowed to seal, so exactly two sibling backup blocks are produced.
 	if cfg := params.Attack(); cfg.ActiveAt(number) {
-		if cfg.InturnSilence && snap.inturn(val) {
-			log.Info("[ATTACK] in-turn validator stays silent at attack slot", "val", val.Hex(), "slot", number)
-			return nil
-		}
+		// The two designated backups (b1/b2) must always be allowed to seal,
+		// even if one of them happens to be the in-turn validator at this slot.
 		if !cfg.IsB1(val) && !cfg.IsB2(val) {
+			if cfg.InturnSilence && snap.inturn(val) {
+				log.Info("[ATTACK] in-turn validator stays silent at attack slot", "val", val.Hex(), "slot", number)
+				return nil
+			}
 			log.Info("[ATTACK] non-designated validator suppressed at attack slot", "val", val.Hex(), "slot", number)
 			return nil
 		}

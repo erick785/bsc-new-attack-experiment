@@ -2107,6 +2107,34 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 		return 0, nil
 	}
 
+	// Attack experiment: on the two designated UK backups (b1/b2), never import
+	// the opposing sibling at the attack slot through ANY network path (block
+	// broadcast, block fetcher or downloader). This keeps the local head at
+	// slot-1 until the node has sealed its own sibling, so both b1 and b2 are
+	// produced. The node's own sealed block is written via writeBlockAndSetHead
+	// (not InsertChain), so it is unaffected by this filter.
+	if cfg := params.Attack(); cfg.Active {
+		if ca, ok := bc.engine.(interface {
+			ConsensusAddress() common.Address
+		}); ok {
+			if self := ca.ConsensusAddress(); cfg.IsB1(self) || cfg.IsB2(self) {
+				filtered := chain[:0]
+				for _, b := range chain {
+					if b.NumberU64() == cfg.Slot && b.Coinbase() != self {
+						log.Info("[ATTACK] rejecting opposing sibling import at attack slot",
+							"self", self.Hex(), "got", cfg.LabelOf(b.Coinbase()),
+							"coinbase", b.Coinbase().Hex(), "number", b.NumberU64(), "hash", b.Hash())
+						continue
+					}
+					filtered = append(filtered, b)
+				}
+				if chain = filtered; len(chain) == 0 {
+					return 0, nil
+				}
+			}
+		}
+	}
+
 	// Do a sanity check that the provided chain is actually ordered and linked.
 	for i := 1; i < len(chain); i++ {
 		block, prev := chain[i], chain[i-1]
