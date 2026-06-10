@@ -2107,20 +2107,24 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 		return 0, nil
 	}
 
-	// Attack experiment: on the two designated UK backups (b1/b2), never import
-	// the opposing sibling at the attack slot through ANY network path (block
-	// broadcast, block fetcher or downloader). This keeps the local head at
-	// slot-1 until the node has sealed its own sibling, so both b1 and b2 are
-	// produced. The node's own sealed block is written via writeBlockAndSetHead
-	// (not InsertChain), so it is unaffected by this filter.
+	// Attack experiment: on the two designated UK backups (b1/b2), do not import
+	// the opposing sibling at an attack slot WHILE this node is still racing to
+	// seal that height (its head is still below the slot). This keeps the local
+	// head at slot-1 until the node has sealed its own sibling, so both b1 and b2
+	// are produced. Once the node has sealed its own block at that height (head
+	// >= slot), the filter no longer applies, so later reorgs/convergence to the
+	// winning sibling can proceed normally — essential for repeated attacks where
+	// the chain must keep advancing between attack slots. The node's own sealed
+	// block is written via writeBlockAndSetHead (not InsertChain), unaffected.
 	if cfg := params.Attack(); cfg.Active {
 		if ca, ok := bc.engine.(interface {
 			ConsensusAddress() common.Address
 		}); ok {
 			if self := ca.ConsensusAddress(); cfg.IsB1(self) || cfg.IsB2(self) {
+				headNum := bc.CurrentBlock().Number.Uint64()
 				filtered := chain[:0]
 				for _, b := range chain {
-					if b.NumberU64() == cfg.Slot && b.Coinbase() != self {
+					if cfg.IsAttackSlot(b.NumberU64()) && b.Coinbase() != self && headNum < b.NumberU64() {
 						log.Info("[ATTACK] rejecting opposing sibling import at attack slot",
 							"self", self.Hex(), "got", cfg.LabelOf(b.Coinbase()),
 							"coinbase", b.Coinbase().Hex(), "number", b.NumberU64(), "hash", b.Hash())

@@ -1734,17 +1734,29 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 	// the in-turn validator stays silent and only the two designated UK backups
 	// (b1/b2) are allowed to seal, so exactly two sibling backup blocks are produced.
 	if cfg := params.Attack(); cfg.ActiveAt(number) {
-		// The two designated backups (b1/b2) must always be allowed to seal,
-		// even if one of them happens to be the in-turn validator at this slot.
-		if !cfg.IsB1(val) && !cfg.IsB2(val) {
-			if cfg.InturnSilence && snap.inturn(val) {
-				log.Info("[ATTACK] in-turn validator stays silent at attack slot", "val", val.Hex(), "slot", number)
+		// Safety net for REPEATED attacks: if neither designated backup can seal
+		// at this slot (both inside the recent-signer window), do not silence
+		// anyone — otherwise the in-turn validator is muted with no replacement
+		// and the chain stalls for the rest of the run. Fall back to normal
+		// consensus for this one slot (that sample simply has no attack).
+		b1Eligible := cfg.B1 != (common.Address{}) && !snap.SignRecently(cfg.B1)
+		b2Eligible := cfg.B2 != (common.Address{}) && !snap.SignRecently(cfg.B2)
+		if !b1Eligible && !b2Eligible {
+			log.Warn("[ATTACK] neither b1 nor b2 eligible at attack slot; skipping attack to avoid chain stall",
+				"slot", number, "b1", cfg.B1.Hex(), "b2", cfg.B2.Hex())
+		} else {
+			// The two designated backups (b1/b2) must always be allowed to seal,
+			// even if one of them happens to be the in-turn validator at this slot.
+			if !cfg.IsB1(val) && !cfg.IsB2(val) {
+				if cfg.InturnSilence && snap.inturn(val) {
+					log.Info("[ATTACK] in-turn validator stays silent at attack slot", "val", val.Hex(), "slot", number)
+					return nil
+				}
+				log.Info("[ATTACK] non-designated validator suppressed at attack slot", "val", val.Hex(), "slot", number)
 				return nil
 			}
-			log.Info("[ATTACK] non-designated validator suppressed at attack slot", "val", val.Hex(), "slot", number)
-			return nil
+			log.Info("[ATTACK] designated backup sealing sibling block", "val", val.Hex(), "label", cfg.LabelOf(val), "slot", number, "diff", header.Difficulty)
 		}
-		log.Info("[ATTACK] designated backup sealing sibling block", "val", val.Hex(), "label", cfg.LabelOf(val), "slot", number, "diff", header.Difficulty)
 	}
 
 	// Sweet, the protocol permits us to sign the block, wait for our time

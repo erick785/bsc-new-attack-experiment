@@ -7,7 +7,13 @@ package params
 // consensus rules (backoff etc.) — it only gates who seals at the attack slot
 // and how the two sibling backup blocks (b1/b2) are routed/timed at broadcast.
 //
-//	ATTACK_SLOT          attack block height t (>0 enables the experiment)
+//	ATTACK_SLOT          first attack block height t (>0 enables the experiment)
+//	ATTACK_PERIOD        block interval between repeated attacks (0 = single shot).
+//	                     Set to validatorCount*turnLength (e.g. 21*8=168) so every
+//	                     attack slot has the identical validator schedule (same
+//	                     in-turn validator silenced, same b1/b2 eligible).
+//	ATTACK_COUNT         number of repeated attacks to perform (default 1; only
+//	                     meaningful together with ATTACK_PERIOD>0).
 //	ATTACK_REGION        this node's datacenter: "uk" | "us" | "sg"
 //	ATTACK_B1            UK backup validator whose block (b1) targets Singapore
 //	ATTACK_B2            UK backup validator whose block (b2) targets US
@@ -30,7 +36,9 @@ import (
 // AttackConfig holds the parsed, immutable experiment configuration.
 type AttackConfig struct {
 	Active        bool
-	Slot          uint64
+	Slot          uint64 // first (and, when Period==0, only) attack height
+	Period        uint64 // block interval between repeated attacks; 0 = single shot
+	Count         int    // number of repeated attacks (>=1); only used when Period>0
 	Region        string // "uk" | "us" | "sg" | ""
 	B1            common.Address
 	B2            common.Address
@@ -65,6 +73,13 @@ func loadAttackConfig() *AttackConfig {
 		c.Slot = v
 		c.Active = true
 	}
+	c.Count = 1
+	if v, err := strconv.ParseUint(strings.TrimSpace(os.Getenv("ATTACK_PERIOD")), 10, 64); err == nil {
+		c.Period = v
+	}
+	if v, err := strconv.Atoi(strings.TrimSpace(os.Getenv("ATTACK_COUNT"))); err == nil && v > 0 {
+		c.Count = v
+	}
 	if v := strings.TrimSpace(os.Getenv("ATTACK_B1")); v != "" {
 		c.B1 = common.HexToAddress(v)
 	}
@@ -91,9 +106,31 @@ func parseIPSet(raw string) map[string]struct{} {
 	return set
 }
 
-// ActiveAt reports whether the experiment is enabled and height is the attack slot.
+// ActiveAt reports whether the experiment is enabled and height is an attack slot.
 func (c *AttackConfig) ActiveAt(height uint64) bool {
-	return c != nil && c.Active && height == c.Slot
+	return c.IsAttackSlot(height)
+}
+
+// IsAttackSlot reports whether height is one of the (possibly repeated) attack
+// slots. With Period==0 there is a single attack at Slot. With Period>0 the
+// attack repeats at Slot, Slot+Period, Slot+2*Period, ... for Count occurrences.
+// Using Period == validatorCount*turnLength guarantees every attack slot sees
+// the identical validator schedule as the first one.
+func (c *AttackConfig) IsAttackSlot(height uint64) bool {
+	if c == nil || !c.Active || height < c.Slot {
+		return false
+	}
+	if c.Period == 0 {
+		return height == c.Slot
+	}
+	off := height - c.Slot
+	if off%c.Period != 0 {
+		return false
+	}
+	if c.Count > 0 && off/c.Period >= uint64(c.Count) {
+		return false
+	}
+	return true
 }
 
 // IsB1 reports whether addr is the UK backup whose block is routed to Singapore.

@@ -202,10 +202,11 @@ type handler struct {
 	handlerDoneCh  chan struct{}
 
 	// Attack experiment: UK-side hold-and-release buffer for the two sibling
-	// backup blocks (b1/b2) at the attack slot.
+	// backup blocks (b1/b2), keyed by attack-slot height so repeated attacks do
+	// not collide with each other.
 	attackMu       sync.Mutex
-	attackBuf      map[string]*attackHeldBlock
-	attackReleased bool
+	attackBuf      map[uint64]map[string]*attackHeldBlock
+	attackReleased map[uint64]bool
 }
 
 // attackHeldBlock is a sibling backup block buffered on a UK node until both
@@ -833,7 +834,7 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 	// slot are not broadcast freely. They are propagated only inside the UK and
 	// buffered; once both siblings are collected they are released together —
 	// b2 -> US immediately, b1 -> Singapore after LEAD_TIME_MS.
-	if cfg := params.Attack(); cfg.Active && cfg.Region == "uk" && block.NumberU64() == cfg.Slot {
+	if cfg := params.Attack(); cfg.Active && cfg.Region == "uk" && cfg.IsAttackSlot(block.NumberU64()) {
 		cb := block.Coinbase()
 		if cfg.IsB1(cb) || cfg.IsB2(cb) {
 			h.attackUKBroadcast(block, cfg)
@@ -980,6 +981,7 @@ func (h *handler) attackUKBroadcast(block *types.Block, cfg *params.AttackConfig
 		return
 	}
 	label := cfg.LabelOf(block.Coinbase())
+	slot := block.NumberU64()
 
 	// 1) propagate to UK peers only, so every UK relay node collects both siblings.
 	hash := block.Hash()
@@ -989,22 +991,30 @@ func (h *handler) attackUKBroadcast(block *types.Block, cfg *params.AttackConfig
 		}
 	}
 
-	// 2) buffer this sibling; release externally once both are present.
+	// 2) buffer this sibling (per attack slot); release once both are present.
 	h.attackMu.Lock()
 	if h.attackBuf == nil {
-		h.attackBuf = make(map[string]*attackHeldBlock, 2)
+		h.attackBuf = make(map[uint64]map[string]*attackHeldBlock)
 	}
-	if _, dup := h.attackBuf[label]; !dup {
-		h.attackBuf[label] = &attackHeldBlock{block: block, td: td}
-		log.Info("[ATTACK] UK buffered sibling", "label", label, "number", block.NumberU64(), "hash", hash)
+	if h.attackReleased == nil {
+		h.attackReleased = make(map[uint64]bool)
 	}
-	b1, has1 := h.attackBuf["b1"]
-	b2, has2 := h.attackBuf["b2"]
-	if !has1 || !has2 || h.attackReleased {
+	buf := h.attackBuf[slot]
+	if buf == nil {
+		buf = make(map[string]*attackHeldBlock, 2)
+		h.attackBuf[slot] = buf
+	}
+	if _, dup := buf[label]; !dup {
+		buf[label] = &attackHeldBlock{block: block, td: td}
+		log.Info("[ATTACK] UK buffered sibling", "label", label, "number", slot, "hash", hash)
+	}
+	b1, has1 := buf["b1"]
+	b2, has2 := buf["b2"]
+	if !has1 || !has2 || h.attackReleased[slot] {
 		h.attackMu.Unlock()
 		return
 	}
-	h.attackReleased = true
+	h.attackReleased[slot] = true
 	h.attackMu.Unlock()
 
 	log.Info("[ATTACK] UK collected both siblings, releasing together",

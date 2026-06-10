@@ -148,7 +148,7 @@ func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, packet *eth.NewBlockPa
 	}
 
 	// Attack experiment ingress handling at the attack slot.
-	if cfg := params.Attack(); cfg.Active && block.NumberU64() == cfg.Slot {
+	if cfg := params.Attack(); cfg.Active && cfg.IsAttackSlot(block.NumberU64()) {
 		// On the two designated UK backups, drop the opposing sibling so the local
 		// in-progress seal is not aborted by an incoming same-height block. Both
 		// b1 and b2 thus get produced.
@@ -176,6 +176,7 @@ func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, packet *eth.NewBlockPa
 				from = addr.String()
 			}
 			log.Info("[ATTACK][SG] received slot-t block",
+				"number", block.NumberU64(),
 				"label", cfg.LabelOf(block.Coinbase()), "coinbase", block.Coinbase().Hex(),
 				"hash", block.Hash(), "from", from, "recvUnixMs", time.Now().UnixMilli())
 		}
