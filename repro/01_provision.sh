@@ -46,6 +46,10 @@ provision_one() { # region pem ip
             echo '  unpacking ${CODE_ZIP}'
             unzip -q -o ${CODE_ZIP} -d code
         fi
+        # the zip embeds a broken .git (config only, no HEAD); it breaks geth's
+        # version stamping (git tag -l --points-at HEAD). Drop it so the build
+        # discovers the outer repo's valid .git instead.
+        rm -rf ${CODE_DIR}/.git
         mkdir -p ~/${REMOTE_ND}/bin
     "
 

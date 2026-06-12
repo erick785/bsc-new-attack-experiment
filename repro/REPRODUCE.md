@@ -94,7 +94,10 @@ Singapore flips its vote to `b2`.
 
 ## 2. Prerequisites
 
-- **3 Ubuntu servers** (one per region), reachable over SSH as user `ubuntu`.
+- **3 servers** (one per region), reachable over SSH as user `ubuntu`. This study used:
+  - **OS:** Ubuntu 24.04
+  - **Instance:** AWS EC2 **t2.xlarge** (4 vCPU, 16 GB RAM) per server
+  - one each in Singapore (`ap-southeast-1`), US Virginia (`us-east-1`), London (`eu-west-2`)
 - **PEM key files** for each server, placed in the repo's `pem/` directory.
 - A local machine (macOS/Linux) with `bash`, `ssh`, `scp` to drive everything.
 - Security-group inbound rules on every server:

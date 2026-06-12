@@ -57,8 +57,11 @@ for L in "${LEADS[@]}"; do
     for h in "${ARCHIVE_HOSTS[@]}"; do
         IFS='|' read -r reg pem ip <<<"$h"
         echo "  [${reg} ${ip}] packing + fetching logs"
+        # pack only the dated rotated files (bsc.log.*); the bare `bsc.log` is a
+        # symlink to an absolute remote path and would be a broken/unopenable link
+        # once extracted locally.
         ssh -i "pem/${pem}" "${OPTS[@]}" "${SSH_USER}@${ip}" \
-            "cd ~/${RND} && tar czf /tmp/lead_${L}_logs.tgz .local/node*/bsc.log* 2>/dev/null"
+            "cd ~/${RND} && tar czf /tmp/lead_${L}_logs.tgz .local/node*/bsc.log.* 2>/dev/null"
         scp -i "pem/${pem}" "${OPTS[@]}" \
             "${SSH_USER}@${ip}:/tmp/lead_${L}_logs.tgz" "$d/${reg}_logs.tgz" 2>/dev/null
     done

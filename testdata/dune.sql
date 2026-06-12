@@ -1,40 +1,45 @@
 -- ============================================================================
--- BSC Validator Set 分析 v2 —— 只统计"真正出块的 21 个共识节点"
+-- BSC Validator Set Analysis v2 — counting only the 21 consensus nodes that
+-- actually produced blocks
 --
--- 与 v1 区别：v1 统计的是每天选出的 45 个 active validator（候选池）；
--- v2 只看每个 epoch 真正参与共识出块的 21 个节点。
+-- Difference from v1: v1 counts the 45 active validators elected each day
+-- (candidate pool); v2 looks only at the 21 nodes that actually participate
+-- in consensus block production each epoch.
 --
--- "当天的 21 个"口径（用户确认）：
---   取当天 UTC 00:00 之后第一个 epoch 的 21 个实际出块者。
---   实现：bnb.blocks 里 00:00 后的区块，按出块者(miner)首次出块的顺序，
---         取前 21 个不同地址 = 该 epoch 的共识集合（实测每天稳定 = 21）。
---   说明：epoch 长度随硬分叉变化、且一天内会多次轮换（窗口内可见 ~30 个），
---         这里用"首个 epoch"作为当天的代表性快照。
+-- Definition of "the 21 for the day" (confirmed by user):
+--   The 21 actual block producers of the first epoch after UTC 00:00 that day.
+--   Implementation: from bnb.blocks after 00:00, order miners by their first
+--   block and take the first 21 distinct addresses = consensus set for that
+--   epoch (empirically stable at exactly 21 per day).
+--   Note: epoch length varies across hard forks and rotates multiple times
+--   within a day (~30 visible in the window); the "first epoch" is used as the
+--   representative daily snapshot.
 --
--- 质押量：join 当天 updateValidatorSetV2 的 45-set（voting_power），
---         staked_bnb = voting_power / 1e8（= totalPooledBNB）。
+-- Stake amount: joined from the same-day updateValidatorSetV2 45-set
+--   (voting_power); staked_bnb = voting_power / 1e8 (= totalPooledBNB).
 --
--- 时间范围：Feynman 硬分叉（mainnet 2024-04-18，首次每日选举 2024-04-19）
---           至 2026 年 4 月底（date < 2026-05-01）。
+-- Time range: Feynman hard fork (mainnet 2024-04-18, first daily election
+--   2024-04-19) through end of April 2026 (date < 2026-05-01).
 -- ============================================================================
 
 
 -- ============================================================================
--- 查询 1：每天真正出块的 21 个共识节点（共识地址 + 质押量），分叉后至 2026-04
+-- Query 1: The 21 consensus nodes that actually produced blocks each day
+--          (consensus address + stake), post-fork through 2026-04
 -- ============================================================================
 WITH blk AS (
     SELECT date AS day, number, miner
     FROM bnb.blocks
     WHERE date >= date '2024-04-18'
       AND date <  date '2026-05-01'
-      AND hour(time) = 0 AND minute(time) < 20   -- 00:00 后的窗口，覆盖首个 epoch
+      AND hour(time) = 0 AND minute(time) < 20   -- window after 00:00, covers the first epoch
 ),
 first_seen AS (
     SELECT day, miner, min(number) AS first_block
     FROM blk
     GROUP BY day, miner
 ),
--- 按首次出块顺序取前 21 个不同出块者 = 当天首个 epoch 的共识集合
+-- Take the first 21 distinct block producers ordered by first block = consensus set of the day's first epoch
 consensus21 AS (
     SELECT day, miner AS validator
     FROM (
@@ -44,7 +49,7 @@ consensus21 AS (
     )
     WHERE rk <= 21
 ),
--- 当天 45-set 的质押权重（来自 updateValidatorSetV2）
+-- Stake weights from the same-day 45-set (from updateValidatorSetV2)
 breathe_updates AS (
     SELECT
         block_time AS ts,
@@ -78,17 +83,18 @@ set45 AS (
 )
 SELECT
     c.day,
-    c.validator,                              -- 共识地址（实际出块者）
-    s.voting_power,                           -- 原始权重 (uint64)
-    s.voting_power / 1e8 AS staked_bnb        -- 质押量 BNB
+    c.validator,                              -- consensus address (actual block producer)
+    s.voting_power,                           -- raw weight (uint64)
+    s.voting_power / 1e8 AS staked_bnb        -- staked amount in BNB
 FROM consensus21 c
 LEFT JOIN set45 s ON s.day = c.day AND s.validator = c.validator
 ORDER BY c.day DESC, s.voting_power DESC;
 
 
 -- ============================================================================
--- 查询 2：每周置换率（21 个共识节点，本周 vs 上周），分叉后至 2026-04
--- 取每周最后一个快照日的 21-set 做对比。
+-- Query 2: Weekly churn rate (21 consensus nodes, current week vs previous),
+--          post-fork through 2026-04.
+--          Uses the 21-set from the last snapshot day of each week for comparison.
 -- ============================================================================
 WITH blk AS (
     SELECT date AS day, number, miner
@@ -150,9 +156,11 @@ ORDER BY week DESC;
 
 
 -- ============================================================================
--- 查询 3：质押量 Top 10 随时间变化（仅 21 个共识节点），分叉后至 2026-04
--- 按区间内最后一天(2026-04-30)21-set 中的质押排名取 Top 10，回溯每日质押 BNB。
--- 注意：成员每天可能不同（21 个会轮换），某天不在 21-set 中则无数据点（断线）。
+-- Query 3: Top-10 stake over time (21 consensus nodes only), post-fork through 2026-04.
+--          Top 10 are ranked by stake in the 21-set on the last day of the range
+--          (2026-04-30); daily staked BNB is back-filled for each.
+--          Note: membership changes daily (the 21 rotate); days when a validator
+--          is not in the 21-set produce no data point (gap in series).
 -- ============================================================================
 WITH blk AS (
     SELECT date AS day, number, miner
@@ -205,7 +213,7 @@ set45 AS (
     CROSS JOIN UNNEST(p.validators, p.powers) AS t(validator, voting_power)
     WHERE p.rn = 1
 ),
--- 21 个共识节点 + 质押量
+-- 21 consensus nodes + stake amount
 consensus_stake AS (
     SELECT c.day, c.validator, s.voting_power, s.voting_power / 1e8 AS staked_bnb
     FROM consensus21 c

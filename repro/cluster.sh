@@ -129,6 +129,8 @@ start_host() { # pem ip start end logfile attack_env  (run with & ; redirects it
         echo '[git pull]'; git pull --ff-only
         # source tree is a gitignored zip, so re-unpack to pick up committed changes
         echo '[unpack code]'; unzip -q -o ${CODE_ZIP} -d code
+        # zip embeds a broken .git (config only) that breaks geth version stamping
+        rm -rf ${CODE_DIR}/.git
         echo '[make geth]'; cd ${CODE_DIR} && make geth
         echo '[install bin]'; mkdir -p ~/${REMOTE_ND}/bin && cp build/bin/geth ~/${REMOTE_ND}/bin/geth
         ~/${REMOTE_ND}/bin/geth version | head -3
